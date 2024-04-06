@@ -1,0 +1,60 @@
+{
+    "global_settings": {
+        "notifications": {
+            "star_battery" : true,
+            "tool_case" : true,
+            "helmet" : true,
+            "workers" : true
+        }
+    },
+    "workers_settings": {
+        "main_planet" : {
+            "enabled" : true,
+            "icon_image" : "Planet_main.png"
+        },
+        "colony_1" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_2" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_3" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_4" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_5" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_6" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_7" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_8" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_9" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_10" : {
+            "enabled" : false,
+            "icon_image" : ""
+        },
+        "colony_11" : {
+            "enabled" : false,
+            "icon_image" : ""
+        }
+    }
+}
