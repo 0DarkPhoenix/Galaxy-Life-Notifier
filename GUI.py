@@ -2,8 +2,6 @@ import asyncio
 import ctypes
 import json
 import os
-import subprocess
-import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
