@@ -4,13 +4,13 @@ from pynput import keyboard, mouse
 
 # Blast Radius Dictionary (Currently unused)
 blast_radius = {
-    9: (410, 250),
+    9: (460, 250),  # skull nuke
 }  # blast_radius: (width, height)
 
 
 # Parameters for the ellipse
-ELLIPSE_WIDTH = 410
-ELLIPSE_HEIGHT = 210
+ELLIPSE_WIDTH = 460
+ELLIPSE_HEIGHT = 250
 ELLIPSE_COLOR = "#FF0000"  # Red color in hex
 TRANSPARENCY = 0.3  # Transparency level
 

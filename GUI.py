@@ -1549,13 +1549,17 @@ class MainWindow(ctk.CTk):
             )
             button_remove_task.grid(row=i, column=4)
 
+    # TODO: Add an extra messages for finishing a cube in the refinery
     def set_buildings_cooldown_text(self, task_id: str) -> str:
         data = self.load_data()
 
         cooldown_date = data["buildings"][task_id]["cooldown"]
 
         if self.compare_to_current_time(cooldown_date):
-            return "Upgrade Finished!"
+            if "refinery" in task_id:
+                return "Cube Refined!"
+            else:
+                return "Upgrade Finished!"
         else:
             cooldown_date_datetime = datetime.fromisoformat(cooldown_date)
             return f"Ready on {cooldown_date_datetime: %d-%m-%Y %H:%M}"
