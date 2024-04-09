@@ -1549,7 +1549,6 @@ class MainWindow(ctk.CTk):
             )
             button_remove_task.grid(row=i, column=4)
 
-    # TODO: Add an extra messages for finishing a cube in the refinery
     def set_buildings_cooldown_text(self, task_id: str) -> str:
         data = self.load_data()
 
