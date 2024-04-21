@@ -9,8 +9,9 @@ blast_radius = {
 
 
 # Parameters for the ellipse
-ELLIPSE_WIDTH = 460
+ELLIPSE_WIDTH = 450
 ELLIPSE_HEIGHT = 250
+OFFSET_HEIGHT = -10
 ELLIPSE_COLOR = "#FF0000"  # Red color in hex
 TRANSPARENCY = 0.3  # Transparency level
 
@@ -37,6 +38,7 @@ class TransparentEllipse:
             fill=ELLIPSE_COLOR,
             outline=ELLIPSE_COLOR,
         )
+        self.canvas.move(self.ellipse, 0, OFFSET_HEIGHT)
         self.canvas.itemconfig(
             self.ellipse, stipple="gray50"
         )  # Adding some pattern to simulate transparency

@@ -1,24 +1,16 @@
 {
     "star_battery": {
-        "cooldown": "2024-04-10T08:57:49.008736"
+        "cooldown": "2024-04-22T00:48:30.094844",
+        "cooldown_finished": false
     },
     "tool_case": {
-        "cooldown": "2024-04-10T09:57:30.803002"
+        "cooldown": "2024-04-21T21:33:36.522571",
+        "cooldown_finished": false
     },
     "helmet": {
-        "cooldown": "2024-04-10T21:54:03.064257"
+        "cooldown": "2024-04-23T07:54:19.555537",
+        "cooldown_finished": false
     },
     "workers": {},
-    "buildings": {
-        "main_planet_laboratory_1": {
-            "cooldown": "2024-04-10T03:11:55.462569",
-            "planet": "Main Planet",
-            "building": "Laboratory"
-        },
-        "main_planet_refinery_1": {
-            "cooldown": "2024-04-10T04:24:53.824371",
-            "planet": "Main Planet",
-            "building": "Refinery"
-        }
-    }
+    "buildings": {}
 }

@@ -1,7 +1,6 @@
 import asyncio
 import ctypes
 import json
-import math
 import os
 import threading
 from datetime import datetime, timedelta
@@ -25,166 +24,102 @@ LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
 
 # FIXME: Fix an issue where a notification is sent twice (most likely because the old instance is still running)
-# TODO: Remove the code for interrupting the sleep, make the sleep 60 seconds but keep the code which can dynamically adjust the sleep time
 class NotificationManager:
     def __init__(self):
         self.running = True
-        self.next_check_time = None
-        self.sleep_event = asyncio.Event()
 
     async def notification_checker(self) -> None:
+        """Checks for scheduled notifications, sends them if they are ready and updates the cooldown text in the GUI."""
         settings = MainWindow.load_settings()
-        self.global_settings = settings["global_settings"]
-        self.first_iteration = settings["global_settings"][
+        global_settings = settings["global_settings"]
+
+        notified_workers = set()
+        notified_buildings = set()
+        notification_sent = {"star_battery": False, "tool_case": False, "helmet": False}
+        first_iteration = settings["global_settings"][
             "disable_notifications_during_startup"
         ]
 
         while self.running:
-            self.data = MainWindow.load_data()
-            min_cooldown_time = None
+            data = MainWindow.load_data()
 
-            # Process each item and task, updating GUI and calculating minimum cooldown time
+            # Update the cooldown text when an item has reached its cooldown time
             for item in ["star_battery", "tool_case", "helmet"]:
-                scheduled_time = self.data[item]["cooldown"]
-                if MainWindow.compare_to_current_time(scheduled_time):
-                    MainWindow.set_item_text(main_window, item)
-                    self.cooldown_finished(item=item)
-                    self.process_notification(item=item)
-                min_cooldown_time = self.update_min_cooldown_time(
-                    min_cooldown_time, scheduled_time
-                )
+                if global_settings[item]:
+                    scheduled_time = data[item]["cooldown"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        MainWindow.set_item_text(main_window, item)
 
             for section in ["workers", "buildings"]:
-                for task_id, task_info in self.data[section].items():
-                    if not task_info["cooldown_finished"]:
-                        scheduled_time = task_info["cooldown"]
+                for task_id in data[section]:
+                    if (
+                        task_id not in notified_workers
+                        and task_id not in notified_buildings
+                    ):
+                        scheduled_time = data[section][task_id]["cooldown"]
                         if MainWindow.compare_to_current_time(scheduled_time):
-                            self.cooldown_finished(section=section, task_id=task_id)
-                            self.process_notification(
-                                section=section, task_info=task_info
-                            )
                             if section == "workers":
                                 MainWindow.workers_tasks_display(main_window)
+                                break
                             elif section == "buildings":
                                 MainWindow.buildings_tasks_display(main_window)
-                        min_cooldown_time = self.update_min_cooldown_time(
-                            min_cooldown_time, scheduled_time
-                        )
+                                break
 
-            if self.first_iteration:
-                self.first_iteration = False
+            if global_settings["workers"]:  # Workers notifications
+                notified_planets = []
+                for worker_id, worker_info in data["workers"].items():
+                    scheduled_time = worker_info["cooldown"]
+                    planet_worker = worker_info["planet"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        if worker_id not in notified_workers:
+                            notified_workers.add(worker_id)
+                            notified_planets.append(planet_worker)
+                            if not first_iteration:
+                                message = f"Your Worker on {planet_worker} is finished!"
+                                self.send_notification(message)
+                    else:
+                        if worker_id in notified_workers:
+                            notified_workers.remove(worker_id)
 
-            # Calculate sleep duration
-            if min_cooldown_time:
-                print(f"{min_cooldown_time=}")
-                sleep_duration = math.ceil(
-                    max(
-                        (min_cooldown_time - datetime.now()).total_seconds(),
-                        1,
-                    )
-                )
-            else:
-                sleep_duration = 30  # Default sleep time if no tasks are found
+            if global_settings["buildings"]:  # Buildings notifications
+                for building_id, building_info in data["buildings"].items():
+                    scheduled_time = building_info["cooldown"]
+                    building = building_info["building"]
+                    planet_building = building_info["planet"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        if building_id not in notified_buildings:
+                            notified_buildings.add(building_id)
+                            if not first_iteration:
+                                message = (
+                                    f"Your {building} on {planet_building} is done!"
+                                )
+                                self.send_notification(message)
+                    else:
+                        if building_id in notified_buildings:
+                            notified_buildings.remove(building_id)
 
-            # Wait for the sleep duration or until the event is set
-            print(f"Sleeping for {sleep_duration} seconds...")
+            # General notifications for star_battery, tool_case, helmet
+            for item in ["star_battery", "tool_case", "helmet"]:
+                if global_settings[item]:
+                    scheduled_time = data[item]["cooldown"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        if not notification_sent[item]:
+                            notification_sent[item] = True
+                            if not first_iteration:
+                                message = f"You can collect your {item.replace('_', ' ').title()} again!"
+                                self.send_notification(message)
+                    else:
+                        notification_sent[item] = False
+
+            if first_iteration:
+                first_iteration = False
+
             await asyncio.sleep(30)
-            # await self.sleep_with_interrupt(sleep_duration)
-            print("Woke up or was interrupted")
 
-    def process_notification(
-        self,
-        *,
-        item: str | None = None,
-        section: str | None = None,
-        task_info: str | None = None,
-    ):
-        if (
-            section is not None
-            and task_info is not None
-            and self.global_settings[section]
-            and not self.first_iteration
-            and not task_info["cooldown_finished"]
-        ):
-            message = f"Your {task_info['building'] if section == 'buildings' else 'Worker'} on {task_info['planet']} is done!"
-            self.send_notification(message)
-
-        if (
-            item is not None
-            and self.global_settings[item]
-            and not self.first_iteration
-            and not self.data[item]["cooldown_finished"]
-        ):
-            message = f"You can collect your {item.replace('_', ' ').title()} again!"
-            self.send_notification(message)
-
-    def send_notification(self, message: str) -> None:
-        """
-        Sends the notification.
-
-        :param message: The message to be displayed in the notification
-        """
+    def send_notification(self, message) -> None:
+        """Sends a notification"""
         title = "Galaxy Life Notifier"
-        icon_path = str(Path(MAIN_IMAGES_PATH, "Starling_Postman.ico"))
-        notification.notify(
-            title=title, message=message, app_icon=icon_path, timeout=10
-        )
-
-    async def sleep_with_interrupt(self, sleep_duration):
-        self.sleep_event.clear()
-        wait_task = asyncio.create_task(self.sleep_event.wait())
-        sleep_task = asyncio.create_task(asyncio.sleep(sleep_duration))
-        done, pending = await asyncio.wait(
-            [wait_task, sleep_task], return_when=asyncio.FIRST_COMPLETED
-        )
-
-        # Cancel the task that didn't finish
-        for task in pending:
-            task.cancel()
-        # Ensure all tasks are properly cleaned up
-        await asyncio.gather(*pending, return_exceptions=True)
-
-        if wait_task in done:
-            print("Sleep was interrupted!")
-        else:
-            print("Sleep completed normally")
-
-    def interrupt_sleep(self):
-        print("Interrupting sleep...")
-        self.sleep_event.set()
-
-    def update_min_cooldown_time(
-        self, current_min: datetime | None, new_time: str
-    ) -> datetime:
-        new_time_datetime = datetime.fromisoformat(new_time)
-        if new_time_datetime and (
-            current_min is None or new_time_datetime < current_min
-        ):
-            return new_time_datetime
-        return current_min
-
-    def cooldown_finished(
-        self,
-        *,
-        item: str | None = None,
-        section: str | None = None,
-        task_id: str | None = None,
-    ) -> None:
-        """
-        Changes the cooldown_finished parameter to true in data.json for the given section and task_id
-
-        :param item: The item to mark as finished (e.g. "star_battery", "tool_case", "helmet")
-        :param section: The section of the task to mark as finished (e.g. "workers", "buildings")
-        :param task_id: The ID of the task to mark as finished
-        """
-        data = MainWindow.load_data()
-
-        if item is not None:
-            data[item]["cooldown_finished"] = True
-        if section is not None and task_id is not None:
-            data[section][task_id]["cooldown_finished"] = True
-
-        MainWindow.save_data(data)
+        notification.notify(title=title, message=message, timeout=10)
 
     def run(self):
         """Runs the notification checker"""
@@ -220,6 +155,19 @@ class NotificationManager:
         if os.path.exists(LOCK_FILE_PATH):
             os.remove(LOCK_FILE_PATH)
         self.running = False
+
+
+def start_notification_manager():
+    notifier = NotificationManager()
+
+    global notifier_thread
+    notifier_thread = threading.Thread(target=notifier.run)
+
+    settings = MainWindow.load_settings()
+    notifier_thread.daemon = not settings["global_settings"][
+        "run_notifications_in_background"
+    ]  # Allows or disallows the thread to be killed when the main program exits
+    notifier_thread.start()
 
 
 class GlobalSettings(ctk.CTkToplevel):
@@ -658,20 +606,7 @@ class MainWindow(ctk.CTk):
         )
 
         self.create_window_elements()
-        self.start_notification_manager()
-
-    def start_notification_manager(self):
-        self.notification_manager = NotificationManager()
-
-        def run_notifier():
-            asyncio.run(self.notification_manager.run())
-
-        notifier_thread = threading.Thread(target=run_notifier)
-        settings = self.load_settings()
-        notifier_thread.daemon = not settings["global_settings"][
-            "run_notifications_in_background"
-        ]
-        notifier_thread.start()
+        start_notification_manager()
 
     def create_window_elements(self):
         """Creates customtkinter window elements for the main window"""
@@ -1126,21 +1061,24 @@ class MainWindow(ctk.CTk):
 
         :param item_type: The type of the item (e.g., "star_battery", "tool_case", "helmet")
         """
+        # Define cooldown hours for each item type
         cooldown_hours = {
             "star_battery": 11,
             "tool_case": 23,
             "helmet": 35,
         }
         data = self.load_data()
+        # Check if the item type is in the cooldown hours dictionary
         if item_type in cooldown_hours:
+            # Calculate the new cooldown time
             hours = cooldown_hours[item_type]
             new_time = (datetime.now() + timedelta(hours=hours)).isoformat()
 
+            # Update the item's cooldown in the data dictionary
             data[item_type]["cooldown"] = new_time
-            data[item_type]["cooldown_finished"] = False
-
+            # Save the updated data
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
+            # Update the corresponding label based on the item type
             self.update_item_label(item_type, self.set_item_text(item_type))
         else:
             print(f"Cooldown hours not defined for {item_type}.")
@@ -1223,11 +1161,7 @@ class MainWindow(ctk.CTk):
                     datetime.now() + timedelta(hours=hours, minutes=minutes)
                 ).isoformat()
 
-            new_entry = {
-                "cooldown": new_time,
-                "planet": planet,
-                "cooldown_finished": False,
-            }
+            new_entry = {"cooldown": new_time, "planet": planet}
 
             # Convert workers data to a list of tuples for sorting
             workers_list = [
@@ -1268,7 +1202,6 @@ class MainWindow(ctk.CTk):
                 self.textbox_minutes_workers.delete(0, 2)
 
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
             self.workers_tasks_display()
 
     def remove_workers_task(self, task_id: str) -> None:
@@ -1475,7 +1408,6 @@ class MainWindow(ctk.CTk):
                 "cooldown": new_time,
                 "planet": planet,
                 "building": building,
-                "cooldown_finished": False,
             }
 
             # Convert buildings data to a list of tuples for sorting
@@ -1517,7 +1449,6 @@ class MainWindow(ctk.CTk):
                 self.textbox_minutes_buildings.delete(0, 2)
 
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
             self.buildings_tasks_display()
 
     def remove_buildings_task(self, task_id):
@@ -1680,7 +1611,7 @@ class MainWindow(ctk.CTk):
     @staticmethod
     def compare_to_current_time(cooldown_date: str) -> bool:
         """
-        Compares the current time to the provided cooldown_date datetime
+        Compares the current time to the provided datetime
 
         :param cooldown_date: The datetime to compare to the current time, must be in ISO 8601 format (datetime.isoformat())
         :return: True if the current datetime is later or equal to the provided cooldown date, False if the current datetime is earlier than the provided cooldown date
@@ -1733,7 +1664,7 @@ class MainWindow(ctk.CTk):
             keys_to_delete = []
             for section in ["workers", "buildings"]:
                 for task_id, task_info in data[section].items():
-                    if task_info["cooldown_finished"]:
+                    if self.compare_to_current_time(task_info["cooldown"]):
                         keys_to_delete.append((section, task_id))
 
             # Delete the expired tasks
@@ -1769,9 +1700,9 @@ def create_data_json():
     print("Creating data.json")
 
     default_data_json_template = {
-        "star_battery": {"cooldown": "", "cooldown_finished": False},
-        "tool_case": {"cooldown": "", "cooldown_finished": False},
-        "helmet": {"cooldown": "", "cooldown_finished": False},
+        "star_battery": {"cooldown": ""},
+        "tool_case": {"cooldown": ""},
+        "helmet": {"cooldown": ""},
         "workers": {},
         "buildings": {},
     }

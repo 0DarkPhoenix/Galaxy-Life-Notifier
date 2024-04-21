@@ -1,0 +1,54 @@
+{
+    "star_battery": {
+        "cooldown": "2024-04-20T20:52:51.221001"
+    },
+    "tool_case": {
+        "cooldown": "2024-04-20T20:17:05.868300"
+    },
+    "helmet": {
+        "cooldown": "2024-04-21T20:53:26.423310"
+    },
+    "workers": {},
+    "buildings": {
+        "colony_1_laboratory_1": {
+            "cooldown": "2024-04-20T18:13:28.360961",
+            "planet": "Colony 1",
+            "building": "Laboratory"
+        },
+        "colony_6_laboratory_1": {
+            "cooldown": "2024-04-20T22:54:46.647453",
+            "planet": "Colony 6",
+            "building": "Laboratory"
+        },
+        "colony_7_factory_1": {
+            "cooldown": "2024-04-21T00:16:27.216866",
+            "planet": "Colony 7",
+            "building": "Factory"
+        },
+        "colony_3_laboratory_1": {
+            "cooldown": "2024-04-21T04:54:08.140311",
+            "planet": "Colony 3",
+            "building": "Laboratory"
+        },
+        "colony_2_laboratory_1": {
+            "cooldown": "2024-04-21T11:53:24.685277",
+            "planet": "Colony 2",
+            "building": "Laboratory"
+        },
+        "colony_4_laboratory_1": {
+            "cooldown": "2024-04-21T11:54:24.393310",
+            "planet": "Colony 4",
+            "building": "Laboratory"
+        },
+        "colony_5_laboratory_1": {
+            "cooldown": "2024-04-21T11:54:57.840310",
+            "planet": "Colony 5",
+            "building": "Laboratory"
+        },
+        "main_planet_laboratory_1": {
+            "cooldown": "2024-04-28T10:09:39.959468",
+            "planet": "Main Planet",
+            "building": "Laboratory"
+        }
+    }
+}

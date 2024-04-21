@@ -1,0 +1,64 @@
+{
+    "global_settings": {
+        "star_battery": true,
+        "tool_case": true,
+        "helmet": true,
+        "workers": true,
+        "buildings": true,
+        "auto_delete_completed_tasks": true,
+        "check_checkbox_instant_build_time_on_startup": true,
+        "disable_notifications_during_startup": true,
+        "run_notifications_in_background": true,
+        "show_command_window": true
+    },
+    "planets_settings": {
+        "main_planet": {
+            "enabled": true,
+            "planet_image": "Planet_main.png"
+        },
+        "colony_1": {
+            "enabled": true,
+            "planet_image": "Planet_green.png"
+        },
+        "colony_2": {
+            "enabled": true,
+            "planet_image": "Planet_yellow.png"
+        },
+        "colony_3": {
+            "enabled": true,
+            "planet_image": "Planet_violet.png"
+        },
+        "colony_4": {
+            "enabled": true,
+            "planet_image": "Planet_white.png"
+        },
+        "colony_5": {
+            "enabled": true,
+            "planet_image": "Planet_blue.png"
+        },
+        "colony_6": {
+            "enabled": true,
+            "planet_image": "Planet_red.png"
+        },
+        "colony_7": {
+            "enabled": true,
+            "planet_image": "Planet_violet.png"
+        },
+        "colony_8": {
+            "enabled": true,
+            "planet_image": "Planet_white.png"
+        },
+        "colony_9": {
+            "enabled": true,
+            "planet_image": "Planet_red.png"
+        },
+        "colony_10": {
+            "enabled": true,
+            "planet_image": "Planet_violet.png"
+        },
+        "colony_11": {
+            "enabled": true,
+            "planet_image": "Planet_white.png"
+        }
+    }
+}
