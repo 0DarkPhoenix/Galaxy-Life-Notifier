@@ -31,6 +31,9 @@ class NotificationManager:
         self.sleep_event = asyncio.Event()
 
     async def notification_checker(self) -> None:
+        """
+        Checks the data.json file for scheduled notifications and sends notifications if needed
+        """
         settings = MainWindow.load_settings()
         self.global_settings = settings["global_settings"]
         self.first_iteration = settings["global_settings"][
@@ -92,6 +95,13 @@ class NotificationManager:
         section: str | None = None,
         task_info: str | None = None,
     ) -> None:
+        """
+        Checks if the notification is send before and sends it if it isn't
+
+        :param item: The item to check (e.g. "star_battery", "tool_case", "helmet")
+        :param section: The section of the task to check (e.g. "workers", "buildings")
+        :param task_info: The information of a task_id
+        """
         if (
             section is not None
             and task_info is not None
@@ -168,7 +178,7 @@ class NotificationManager:
 
         MainWindow.save_data(data)
 
-    def run(self):
+    def run(self) -> None:
         """Runs the notification checker"""
         self.check_and_handle_existing_instance()
         self.create_lock_file()
