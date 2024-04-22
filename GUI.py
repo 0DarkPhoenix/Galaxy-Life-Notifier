@@ -1,7 +1,6 @@
 import asyncio
 import ctypes
 import json
-import math
 import os
 import threading
 from datetime import datetime, timedelta
@@ -9,7 +8,7 @@ from pathlib import Path
 
 import customtkinter as ctk
 from PIL import Image
-from plyer import notification
+from winotify import Notification, audio
 
 ctk.set_appearance_mode("dark")
 
@@ -25,7 +24,6 @@ LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
 
 # FIXME: Fix an issue where a notification is sent twice (most likely because the old instance is still running)
-# TODO: Remove the code for interrupting the sleep, make the sleep 60 seconds but keep the code which can dynamically adjust the sleep time
 class NotificationManager:
     def __init__(self):
         self.running = True
@@ -76,21 +74,16 @@ class NotificationManager:
 
             # Calculate sleep duration
             if min_cooldown_time:
-                print(f"{min_cooldown_time=}")
-                sleep_duration = math.ceil(
-                    max(
-                        (min_cooldown_time - datetime.now()).total_seconds(),
-                        1,
-                    )
-                )
+                sleep_duration = max(
+                    min_cooldown_time - datetime.now(), timedelta(seconds=1)
+                ).total_seconds()
+                sleep_duration = min(sleep_duration, 60)
             else:
-                sleep_duration = 30  # Default sleep time if no tasks are found
+                sleep_duration = 60
 
             # Wait for the sleep duration or until the event is set
             print(f"Sleeping for {sleep_duration} seconds...")
-            await asyncio.sleep(30)
-            # await self.sleep_with_interrupt(sleep_duration)
-            print("Woke up or was interrupted")
+            await asyncio.sleep(sleep_duration)
 
     def process_notification(
         self,
@@ -98,7 +91,7 @@ class NotificationManager:
         item: str | None = None,
         section: str | None = None,
         task_info: str | None = None,
-    ):
+    ) -> None:
         if (
             section is not None
             and task_info is not None
@@ -120,38 +113,27 @@ class NotificationManager:
 
     def send_notification(self, message: str) -> None:
         """
-        Sends the notification.
+        Sends the notification using winotify.
 
         :param message: The message to be displayed in the notification
         """
         title = "Galaxy Life Notifier"
-        icon_path = str(Path(MAIN_IMAGES_PATH, "Starling_Postman.ico"))
-        notification.notify(
-            title=title, message=message, app_icon=icon_path, timeout=10
+        icon_path = str(Path(MAIN_IMAGES_PATH, "Starling_Postman_AI_Upscaled.ico"))
+
+        # Create a notification
+        toast = Notification(
+            app_id="Galaxy Life Notifier",
+            title=title,
+            msg=message,
+            icon=icon_path,
+            duration="short",
         )
 
-    async def sleep_with_interrupt(self, sleep_duration):
-        self.sleep_event.clear()
-        wait_task = asyncio.create_task(self.sleep_event.wait())
-        sleep_task = asyncio.create_task(asyncio.sleep(sleep_duration))
-        done, pending = await asyncio.wait(
-            [wait_task, sleep_task], return_when=asyncio.FIRST_COMPLETED
-        )
+        # Optionally, you can add sound to the notification
+        toast.set_audio(audio.Default, loop=False)
 
-        # Cancel the task that didn't finish
-        for task in pending:
-            task.cancel()
-        # Ensure all tasks are properly cleaned up
-        await asyncio.gather(*pending, return_exceptions=True)
-
-        if wait_task in done:
-            print("Sleep was interrupted!")
-        else:
-            print("Sleep completed normally")
-
-    def interrupt_sleep(self):
-        print("Interrupting sleep...")
-        self.sleep_event.set()
+        # Show the notification
+        toast.show()
 
     def update_min_cooldown_time(
         self, current_min: datetime | None, new_time: str
@@ -676,7 +658,7 @@ class MainWindow(ctk.CTk):
     def create_window_elements(self):
         """Creates customtkinter window elements for the main window"""
         main_title_image = ctk.CTkImage(
-            Image.open(Path(MAIN_IMAGES_PATH, "Starling_Postman.png")),
+            Image.open(Path(MAIN_IMAGES_PATH, "Starling_Postman_AI_Upscaled.png")),
             size=(75, 75),
         )
         main_title = ctk.CTkLabel(
@@ -1140,7 +1122,6 @@ class MainWindow(ctk.CTk):
             data[item_type]["cooldown_finished"] = False
 
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
             self.update_item_label(item_type, self.set_item_text(item_type))
         else:
             print(f"Cooldown hours not defined for {item_type}.")
@@ -1268,7 +1249,6 @@ class MainWindow(ctk.CTk):
                 self.textbox_minutes_workers.delete(0, 2)
 
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
             self.workers_tasks_display()
 
     def remove_workers_task(self, task_id: str) -> None:
@@ -1517,7 +1497,6 @@ class MainWindow(ctk.CTk):
                 self.textbox_minutes_buildings.delete(0, 2)
 
             self.save_data(data)
-            NotificationManager.interrupt_sleep(self.notification_manager)
             self.buildings_tasks_display()
 
     def remove_buildings_task(self, task_id):

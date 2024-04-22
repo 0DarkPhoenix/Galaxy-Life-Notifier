@@ -1,16 +1,75 @@
 {
     "star_battery": {
-        "cooldown": "2024-04-22T00:48:30.094844",
+        "cooldown": "2024-04-22T21:03:29.306177",
         "cooldown_finished": false
     },
     "tool_case": {
-        "cooldown": "2024-04-21T21:33:36.522571",
+        "cooldown": "2024-04-23T09:03:46.309359",
         "cooldown_finished": false
     },
     "helmet": {
         "cooldown": "2024-04-23T07:54:19.555537",
         "cooldown_finished": false
     },
-    "workers": {},
-    "buildings": {}
+    "workers": {
+        "main_planet_1": {
+            "cooldown": "2024-04-22T15:42:51.496332",
+            "planet": "Main Planet",
+            "cooldown_finished": true
+        },
+        "main_planet_2": {
+            "cooldown": "2024-04-22T15:45:04.065952",
+            "planet": "Main Planet",
+            "cooldown_finished": true
+        },
+        "colony_1_1": {
+            "cooldown": "2024-04-22T16:25:45.040839",
+            "planet": "Colony 1",
+            "cooldown_finished": false
+        }
+    },
+    "buildings": {
+        "colony_6_laboratory_1": {
+            "cooldown": "2024-04-22T23:22:29.725566",
+            "planet": "Colony 6",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "colony_1_laboratory_1": {
+            "cooldown": "2024-04-22T23:22:40.380538",
+            "planet": "Colony 1",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "colony_7_laboratory_1": {
+            "cooldown": "2024-04-23T04:53:12.383461",
+            "planet": "Colony 7",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "colony_2_laboratory_1": {
+            "cooldown": "2024-04-23T14:35:57.443538",
+            "planet": "Colony 2",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "colony_5_laboratory_1": {
+            "cooldown": "2024-04-23T14:37:56.607566",
+            "planet": "Colony 5",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "colony_4_laboratory_1": {
+            "cooldown": "2024-04-23T14:38:26.000539",
+            "planet": "Colony 4",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        },
+        "main_planet_laboratory_1": {
+            "cooldown": "2024-04-28T10:08:46.098574",
+            "planet": "Main Planet",
+            "building": "Laboratory",
+            "cooldown_finished": false
+        }
+    }
 }
