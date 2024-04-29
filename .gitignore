@@ -1,6 +1,6 @@
-Experiments
-output
-Release
+Experiments/
+output/
+Release/
 color_palette.json
 data.json
 settings.json
