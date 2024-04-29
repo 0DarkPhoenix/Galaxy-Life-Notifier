@@ -5,10 +5,12 @@
         "helmet": true,
         "workers": true,
         "buildings": true,
+        "unique_icons": true,
+        "unique_messages": true,
         "auto_delete_completed_tasks": true,
         "check_checkbox_instant_build_time_on_startup": true,
         "disable_notifications_during_startup": true,
-        "run_notifications_in_background": true,
+        "run_notifications_in_background": false,
         "show_command_window": true
     },
     "planets_settings": {
@@ -50,7 +52,7 @@
         },
         "colony_9": {
             "enabled": true,
-            "planet_image": "Planet_red.png"
+            "planet_image": "Planet_blue.png"
         },
         "colony_10": {
             "enabled": true,

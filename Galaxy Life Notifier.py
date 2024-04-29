@@ -2,11 +2,18 @@ import asyncio
 import ctypes
 import json
 import os
+import random
+import re
+import sys
 import threading
 from datetime import datetime, timedelta
+from math import ceil
 from pathlib import Path
+from tkinter import TclError
+from tkinter.colorchooser import askcolor
 
 import customtkinter as ctk
+import psutil
 from PIL import Image
 from winotify import Notification, audio
 
@@ -14,7 +21,12 @@ ctk.set_appearance_mode("dark")
 
 global main_window  # main_window gets defined if __name__ == "__main__"
 
-MAIN_PATH = os.path.abspath(os.path.dirname(__file__))
+if getattr(sys, "frozen", False):
+    # If the application is run as a bundled executable, use the directory of the executable
+    MAIN_PATH = os.path.dirname(sys.executable)
+else:
+    # Otherwise, just use the normal directory where the script resides
+    MAIN_PATH = os.path.abspath(os.path.dirname(__file__))
 
 MAIN_IMAGES_PATH = Path(MAIN_PATH, "Images")
 
@@ -22,13 +34,17 @@ PLANETS_IMAGES_PATH = Path(MAIN_IMAGES_PATH, "Planets")
 
 LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
+# TODO: Save the colors in a separate json file and make it so the user can change them
+# Default Colors
+DEFAULT_MAIN_FG_COLOR = "#d66c2b"
+DEFAULT_MAIN_HOVER_COLOR = "#a54216"
+DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
+DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
-# FIXME: Fix an issue where a notification is sent twice (most likely because the old instance is still running)
+
 class NotificationManager:
     def __init__(self):
         self.running = True
-        self.next_check_time = None
-        self.sleep_event = asyncio.Event()
 
     async def notification_checker(self) -> None:
         """
@@ -43,17 +59,20 @@ class NotificationManager:
         while self.running:
             self.data = MainWindow.load_data()
             min_cooldown_time = None
+            run_workers_task_display = False
+            run_buildings_task_display = False
 
             # Process each item and task, updating GUI and calculating minimum cooldown time
             for item in ["star_battery", "tool_case", "helmet"]:
-                scheduled_time = self.data[item]["cooldown"]
-                if MainWindow.compare_to_current_time(scheduled_time):
-                    MainWindow.set_item_text(main_window, item)
-                    self.cooldown_finished(item=item)
-                    self.process_notification(item=item)
-                min_cooldown_time = self.update_min_cooldown_time(
-                    min_cooldown_time, scheduled_time
-                )
+                if not self.data[item]["cooldown_finished"]:
+                    scheduled_time = self.data[item]["cooldown"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        MainWindow.set_item_text(main_window, item)
+                        self.cooldown_finished(item=item)
+                        self.process_notification(item=item)
+                    min_cooldown_time = self.update_min_cooldown_time(
+                        min_cooldown_time, scheduled_time
+                    )
 
             for section in ["workers", "buildings"]:
                 for task_id, task_info in self.data[section].items():
@@ -65,21 +84,27 @@ class NotificationManager:
                                 section=section, task_info=task_info
                             )
                             if section == "workers":
-                                MainWindow.workers_tasks_display(main_window)
+                                run_workers_task_display = True
                             elif section == "buildings":
-                                MainWindow.buildings_tasks_display(main_window)
+                                run_buildings_task_display = True
                         min_cooldown_time = self.update_min_cooldown_time(
                             min_cooldown_time, scheduled_time
                         )
+
+            if run_workers_task_display:
+                MainWindow.workers_tasks_display(main_window)
+
+            if run_buildings_task_display:
+                MainWindow.buildings_tasks_display(main_window)
 
             if self.first_iteration:
                 self.first_iteration = False
 
             # Calculate sleep duration
             if min_cooldown_time:
-                sleep_duration = max(
-                    min_cooldown_time - datetime.now(), timedelta(seconds=1)
-                ).total_seconds()
+                sleep_duration = ceil(
+                    max((min_cooldown_time - datetime.now()).total_seconds(), 1)
+                )
                 sleep_duration = min(sleep_duration, 60)
             else:
                 sleep_duration = 60
@@ -96,7 +121,7 @@ class NotificationManager:
         task_info: str | None = None,
     ) -> None:
         """
-        Checks if the notification is send before and sends it if it isn't
+        Checks if the notification is send before and sends it if it isn't.
 
         :param item: The item to check (e.g. "star_battery", "tool_case", "helmet")
         :param section: The section of the task to check (e.g. "workers", "buildings")
@@ -109,8 +134,91 @@ class NotificationManager:
             and not self.first_iteration
             and not task_info["cooldown_finished"]
         ):
-            message = f"Your {task_info['building'] if section == 'buildings' else 'Worker'} on {task_info['planet']} is done!"
-            self.send_notification(message)
+            planet = (
+                "your Main Planet"
+                if task_info["planet"] == "Main Planet"
+                else task_info["planet"]
+            )
+            building = task_info["building"] if section == "buildings" else None
+
+            if self.global_settings["unique_messages"]:
+                if section == "workers":
+                    messages = {
+                        f"I'm finished on {planet}, Chief!": None,
+                        f"I'm done. Check out my beautiful work on {planet}!": None,
+                        f"I'm finished on {planet}, I hope you like it!": None,
+                        f"I'm done, {planet} looks even better now!": None,
+                        f"I've completed my task on {planet}, Chief!": None,
+                        f"I finished my task on {planet}. I'm ready for the next one!": None,
+                        f"I've worked tirelessly on {planet}, Chief. I don't need any sleep!": None,
+                        f"I worked for so long on {planet}, I wonder how I'm still not buffed!": None,
+                    }
+                    if self.global_settings["unique_icons"]:
+                        message_firebit = f"I see your worker has finished upgrading on {planet}. I can't wait to see my army lay that building in ruin!"
+                        message_elderby = f"Your worker on {planet} is done, young Starling. Your base has matured greatly since I've last seen it!"
+                        messages.update(
+                            {
+                                message_firebit: 0.01,
+                                message_elderby: 0.01,
+                            }
+                        )
+
+                elif section == "buildings" and building == "Laboratory":
+                    messages = {
+                        f"Your upgraded unit on {planet} is done!": None,
+                        f"I've finished upgrading your unit on {planet}, Chief!": None,
+                        f"I've made a unit on {planet} even stronger, and you can use him now!": None,
+                    }
+                    if self.global_settings["unique_icons"]:
+                        message_firebit = f"I see you upgraded a unit on {planet}. Don't be happy about it, you still won't stand a chance against me!"
+                        message_elderby = f"Your unit on {planet} has been upgraded, young Starling. Its power looks even more terrific than before!"
+                        messages.update(
+                            {
+                                message_firebit: 0.02,
+                                message_elderby: 0.02,
+                            }
+                        )
+
+                message = self.randomly_choose_option(messages)
+
+            else:
+                message = f"Your {building if section == 'buildings' else 'Worker'} on {planet} is done!"
+
+            if self.global_settings["unique_icons"]:
+                if section == "workers":
+                    icon_images = {
+                        "Worker.ico": None,
+                        "Worker_Happy.ico": None,
+                    }
+                elif section == "buildings":
+                    if building == "Laboratory" or building == "Refinery":
+                        icon_images = {
+                            "Chubi.ico": None,
+                            "Chubi_Happy.ico": None,
+                        }
+                    elif building in ["Training Camp", "Factory", "StarPort"]:
+                        icon_images = {
+                            "Major_Wor.ico": None,
+                            "Major_Wor_Happy.ico": None,
+                        }
+
+                # Check if the message matches special cases and assign directly
+                if message == message_firebit:
+                    icon_image = "Firebit.ico"
+                elif message == message_elderby:
+                    icon_image = "Elderby.ico"
+                else:
+                    # Only choose randomly if icon_images is set and not in special message cases
+                    if icon_images is not None:
+                        icon_image = self.randomly_choose_option(icon_images)
+                    else:
+                        raise ValueError(
+                            "No values were assigned to the icon_images dictionary"
+                        )
+            else:
+                icon_image = "Starling_Postman_AI_Upscaled.ico"
+
+            self.send_notification(message, icon_image)
 
         if (
             item is not None
@@ -119,16 +227,37 @@ class NotificationManager:
             and not self.data[item]["cooldown_finished"]
         ):
             message = f"You can collect your {item.replace('_', ' ').title()} again!"
-            self.send_notification(message)
+            self.send_notification(message, icon_image)
 
-    def send_notification(self, message: str) -> None:
+    def randomly_choose_option(self, options: dict[str, float | None]) -> str:
+        """
+        Randomly chooses an option. Probabilities get automatically calculated.
+
+        :param options: The list of options. An option can be passed with a custom probability of type float. If you don't want a custom probability for that option, pass None
+        :return: The chosen option
+        """
+        total_specified_prob = sum(
+            prob for prob in options.values() if prob is not None
+        )
+        unspecified_options = [msg for msg, prob in options.items() if prob is None]
+        num_unspecified = len(unspecified_options)
+        if num_unspecified > 0:
+            regular_probability = (1.0 - total_specified_prob) / num_unspecified
+            for msg in unspecified_options:
+                options[msg] = regular_probability
+
+        options, probabilities = zip(*options.items())
+        return random.choices(options, probabilities)[0]
+
+    def send_notification(self, message: str, icon_image: str) -> None:
         """
         Sends the notification using winotify.
 
         :param message: The message to be displayed in the notification
+        :param icon_image: The icon to be displayed in the notification
         """
         title = "Galaxy Life Notifier"
-        icon_path = str(Path(MAIN_IMAGES_PATH, "Starling_Postman_AI_Upscaled.ico"))
+        icon_path = str(Path(MAIN_IMAGES_PATH, icon_image))
 
         # Create a notification
         toast = Notification(
@@ -192,26 +321,507 @@ class NotificationManager:
     def check_and_handle_existing_instance(self) -> None:
         """Checks if an instance of the notification manager is already running and kills it if it is"""
         if os.path.exists(LOCK_FILE_PATH):
-            # Attempt to stop the old instance
-            print(
-                "Found an existing Notification Manager instance running. Attempting to stop it."
-            )
             try:
-                os.remove(LOCK_FILE_PATH)
-                print("Successfully stopped the old instance.")
-            except:
-                print("Failed to stop the old instance.")
+                with open(LOCK_FILE_PATH, "r") as file:
+                    old_pid = int(file.read().strip())
+                if self.is_process_running(old_pid):
+                    self.terminate_process(old_pid)
+                else:
+                    print(f"No existing process with PID {old_pid} found.")
+            except ValueError:
+                print(
+                    "Lock file does not contain a valid PID. It may be corrupted or manually edited."
+                )
+            except Exception as e:
+                print(f"An error occurred while handling the lock file: {e}")
+
+    def is_process_running(self, pid):
+        """Check if a process with the given PID is still running."""
+        try:
+            p = psutil.Process(pid)
+            return p.is_running()
+        except psutil.NoSuchProcess:
+            return False
+
+    def terminate_process(self, pid):
+        """Terminate the process with the given PID."""
+        try:
+            p = psutil.Process(pid)
+            p.terminate()  # Sends a SIGTERM
+            p.wait()  # Wait for the process to terminate
+            print(f"Successfully terminated the process with PID {pid}.")
+        except psutil.NoSuchProcess:
+            print(f"No process found with PID {pid}.")
+        except psutil.AccessDenied:
+            print(f"Access denied when trying to terminate the process with PID {pid}.")
+        except Exception as e:
+            print(f"Failed to terminate the process with PID {pid}: {e}")
 
     def create_lock_file(self) -> None:
         """Creates a lock file to prevent multiple instances of the notification manager from running"""
         with open(LOCK_FILE_PATH, "w") as lock_file:
-            lock_file.write("running")
+            lock_file.write(str(os.getpid()))  # Write the current PID
 
     def cleanup(self) -> None:
         """Cleans up the lock file and sets the self.running flag to False"""
         if os.path.exists(LOCK_FILE_PATH):
             os.remove(LOCK_FILE_PATH)
         self.running = False
+
+
+class ColorSettings(ctk.CTkToplevel):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Color Settings")
+        self.geometry("800x500")
+        self.attributes("-topmost", True)
+
+        self.color_changed = False
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        self.create_window_elements()
+
+    def create_window_elements(self) -> None:
+        """Creates customtkinter window elements for the color settings window"""
+        # Destroy all widgets in the window to redraw them when a color has changed
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        main_title = ctk.CTkLabel(self, text="Color Settings", font=("Arial", 28))
+        main_title.place(relx=0.39, rely=0.03)
+
+        button_reset_colors_to_default = ctk.CTkButton(
+            self,
+            text="Reset Colors to Default",
+            fg_color="red",
+            hover_color="darkred",
+            command=self.reset_colors_to_default,
+        )
+        button_reset_colors_to_default.place(
+            relx=0.75, rely=0.03, relwidth=0.22, relheight=0.04
+        )
+
+        self.color_labels = {}
+        self.color_entries = {}
+        color_palette = MainWindow.load_color_palette()
+
+        image_color_picker = ctk.CTkImage(
+            Image.open(Path(MAIN_IMAGES_PATH, "color_palette.png")),
+            size=(25, 25),
+        )
+
+        frame_color_settings = ctk.CTkFrame(self)
+        frame_color_settings.place(relx=0.05, rely=0.25, relwidth=0.9, relheight=0.6)
+
+        frame_color_settings.columnconfigure(1, weight=1)
+        frame_color_settings.columnconfigure(2, weight=1)
+        frame_color_settings.columnconfigure(3, weight=1)
+        frame_color_settings.columnconfigure(4, weight=1)
+
+        for i in range(1, 6):
+            frame_color_settings.rowconfigure(i, weight=1)
+
+        # MAIN_FG_COLOR
+        main_fg_color_label = ctk.CTkLabel(
+            frame_color_settings,
+            text="Main Foreground Color",
+            font=("Arial", 16),
+        )
+        main_fg_color_label.grid(row=1, column=1)
+
+        main_fg_color_color_picker_button = ctk.CTkButton(
+            frame_color_settings,
+            text="",
+            image=image_color_picker,
+            fg_color="#363636",
+            hover_color=color_palette["MAIN_HOVER_COLOR"],
+            width=25,
+            height=25,
+            command=lambda: self.ask_color("MAIN_FG_COLOR"),
+        )
+        main_fg_color_color_picker_button.grid(row=1, column=2, sticky="w")
+
+        # Variable to hold the color hex code
+        main_fg_color_var = ctk.StringVar()
+
+        main_fg_color_label_color = ctk.CTkLabel(
+            frame_color_settings,
+            text="■",
+            text_color=color_palette["MAIN_FG_COLOR"],
+            font=("Arial", 36),
+        )
+        main_fg_color_label_color.grid(row=1, column=2, sticky="e")
+        self.color_labels["MAIN_FG_COLOR"] = main_fg_color_label_color
+
+        main_fg_color_entry = ctk.CTkEntry(
+            frame_color_settings,
+            textvariable=main_fg_color_var,
+            placeholder_text="Hex color code",
+            font=("Arial", 14),
+            width=150,
+        )
+        main_fg_color_entry.grid(row=1, column=3)
+        main_fg_color_entry.insert(0, color_palette["MAIN_FG_COLOR"])
+        self.color_entries["MAIN_FG_COLOR"] = main_fg_color_entry
+
+        # Adding trace to main_fg_color_var after the insert function to prevent the on_entry_change function from being called
+        main_fg_color_var.trace_add(
+            "write",
+            lambda name, index, mode: self.on_entry_change(
+                "MAIN_FG_COLOR", main_fg_color_var
+            ),
+        )
+
+        main_fg_color_apply_button = ctk.CTkButton(
+            frame_color_settings,
+            text="Apply",
+            font=("Arial", 14),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            width=100,
+            command=lambda: self.set_color("MAIN_FG_COLOR", main_fg_color_entry.get()),
+        )
+        main_fg_color_apply_button.grid(row=1, column=4)
+
+        # MAIN_HOVER_COLOR
+        main_hover_color_label = ctk.CTkLabel(
+            frame_color_settings,
+            text="Main Hover Color",
+            font=("Arial", 16),
+        )
+        main_hover_color_label.grid(row=2, column=1)
+
+        main_hover_color_color_picker_button = ctk.CTkButton(
+            frame_color_settings,
+            text="",
+            image=image_color_picker,
+            fg_color="#363636",
+            hover_color=color_palette["MAIN_HOVER_COLOR"],
+            width=25,
+            height=25,
+            command=lambda: self.ask_color("MAIN_HOVER_COLOR"),
+        )
+        main_hover_color_color_picker_button.grid(row=2, column=2, sticky="w")
+
+        # Variable to hold the color hex code
+        main_hover_color_var = ctk.StringVar()
+
+        main_hover_color_label_color = ctk.CTkLabel(
+            frame_color_settings,
+            text="■",
+            text_color=color_palette["MAIN_HOVER_COLOR"],
+            font=("Arial", 36),
+        )
+        main_hover_color_label_color.grid(row=2, column=2, sticky="e")
+        self.color_labels["MAIN_HOVER_COLOR"] = main_hover_color_label_color
+
+        main_hover_color_entry = ctk.CTkEntry(
+            frame_color_settings,
+            textvariable=main_hover_color_var,
+            placeholder_text="Hex color code",
+            font=("Arial", 14),
+            width=150,
+        )
+        main_hover_color_entry.grid(row=2, column=3)
+        main_hover_color_entry.insert(0, color_palette["MAIN_HOVER_COLOR"])
+        self.color_entries["MAIN_HOVER_COLOR"] = main_hover_color_entry
+
+        # Adding trace to main_hover_color_var after the insert function to prevent the on_entry_change function from being called
+        main_hover_color_var.trace_add(
+            "write",
+            lambda name, index, mode: self.on_entry_change(
+                "MAIN_HOVER_COLOR", main_hover_color_var
+            ),
+        )
+
+        main_hover_color_apply_button = ctk.CTkButton(
+            frame_color_settings,
+            text="Apply",
+            font=("Arial", 14),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            width=100,
+            command=lambda: self.set_color(
+                "MAIN_HOVER_COLOR", main_hover_color_entry.get()
+            ),
+        )
+        main_hover_color_apply_button.grid(row=2, column=4)
+
+        # REMOVE_TASK_BUTTON_FG_COLOR
+        remove_task_button_fg_color_label = ctk.CTkLabel(
+            frame_color_settings,
+            text="Remove Task Button Foreground Color",
+            font=("Arial", 16),
+        )
+        remove_task_button_fg_color_label.grid(row=3, column=1)
+
+        remove_task_button_fg_color_color_picker_button = ctk.CTkButton(
+            frame_color_settings,
+            text="",
+            image=image_color_picker,
+            fg_color="#363636",
+            hover_color=color_palette["MAIN_HOVER_COLOR"],
+            width=25,
+            height=25,
+            command=lambda: self.ask_color("REMOVE_TASK_BUTTON_FG_COLOR"),
+        )
+        remove_task_button_fg_color_color_picker_button.grid(
+            row=3, column=2, sticky="w"
+        )
+
+        # Variable to hold the color hex code
+        remove_task_button_fg_color_var = ctk.StringVar()
+
+        remove_task_button_fg_color_label_color = ctk.CTkLabel(
+            frame_color_settings,
+            text="■",
+            text_color=color_palette["REMOVE_TASK_BUTTON_FG_COLOR"],
+            font=("Arial", 36),
+        )
+        remove_task_button_fg_color_label_color.grid(row=3, column=2, sticky="e")
+        self.color_labels["REMOVE_TASK_BUTTON_FG_COLOR"] = (
+            remove_task_button_fg_color_label_color
+        )
+
+        remove_task_button_fg_color_entry = ctk.CTkEntry(
+            frame_color_settings,
+            textvariable=remove_task_button_fg_color_var,
+            placeholder_text="Hex color code",
+            font=("Arial", 14),
+            width=150,
+        )
+        remove_task_button_fg_color_entry.grid(row=3, column=3)
+        remove_task_button_fg_color_entry.insert(
+            0, color_palette["REMOVE_TASK_BUTTON_FG_COLOR"]
+        )
+        self.color_entries["REMOVE_TASK_BUTTON_FG_COLOR"] = (
+            remove_task_button_fg_color_entry
+        )
+
+        # Adding trace to remove_task_button_fg_color_var after the insert function to prevent the on_entry_change function from being called
+        remove_task_button_fg_color_var.trace_add(
+            "write",
+            lambda name, index, mode: self.on_entry_change(
+                "REMOVE_TASK_BUTTON_FG_COLOR", remove_task_button_fg_color_var
+            ),
+        )
+
+        remove_task_button_fg_color_apply_button = ctk.CTkButton(
+            frame_color_settings,
+            text="Apply",
+            font=("Arial", 14),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            width=100,
+            command=lambda: self.set_color(
+                "REMOVE_TASK_BUTTON_FG_COLOR", remove_task_button_fg_color_entry.get()
+            ),
+        )
+        remove_task_button_fg_color_apply_button.grid(row=3, column=4)
+
+        # REMOVE_TASK_BUTTON_HOVER_COLOR
+        remove_task_button_hover_color_label = ctk.CTkLabel(
+            frame_color_settings,
+            text="Remove Task Button Hover Color",
+            font=("Arial", 16),
+        )
+        remove_task_button_hover_color_label.grid(row=4, column=1)
+
+        remove_task_button_hover_color_color_picker_button = ctk.CTkButton(
+            frame_color_settings,
+            text="",
+            image=image_color_picker,
+            fg_color="#363636",
+            hover_color=color_palette["MAIN_HOVER_COLOR"],
+            width=25,
+            height=25,
+            command=lambda: self.ask_color("REMOVE_TASK_BUTTON_HOVER_COLOR"),
+        )
+        remove_task_button_hover_color_color_picker_button.grid(
+            row=4, column=2, sticky="w"
+        )
+
+        # Variable to hold the color hex code
+        remove_task_button_hover_color_var = ctk.StringVar()
+
+        remove_task_button_hover_color_label_color = ctk.CTkLabel(
+            frame_color_settings,
+            text="■",
+            text_color=color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"],
+            font=("Arial", 36),
+        )
+        remove_task_button_hover_color_label_color.grid(row=4, column=2, sticky="e")
+        self.color_labels["REMOVE_TASK_BUTTON_HOVER_COLOR"] = (
+            remove_task_button_hover_color_label_color
+        )
+
+        remove_task_button_hover_color_entry = ctk.CTkEntry(
+            frame_color_settings,
+            textvariable=remove_task_button_hover_color_var,
+            placeholder_text="Hex color code",
+            font=("Arial", 14),
+            width=150,
+        )
+        remove_task_button_hover_color_entry.grid(row=4, column=3)
+        remove_task_button_hover_color_entry.insert(
+            0, color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"]
+        )
+        self.color_entries["REMOVE_TASK_BUTTON_HOVER_COLOR"] = (
+            remove_task_button_hover_color_entry
+        )
+
+        # Adding trace to remove_task_button_hover_color_var after the insert function to prevent the on_entry_change function from being called
+        remove_task_button_hover_color_var.trace_add(
+            "write",
+            lambda name, index, mode: self.on_entry_change(
+                "REMOVE_TASK_BUTTON_HOVER_COLOR", remove_task_button_hover_color_var
+            ),
+        )
+
+        remove_task_button_hover_color_apply_button = ctk.CTkButton(
+            frame_color_settings,
+            text="Apply",
+            font=("Arial", 14),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            width=100,
+            command=lambda: self.set_color(
+                "REMOVE_TASK_BUTTON_HOVER_COLOR",
+                remove_task_button_hover_color_entry.get(),
+            ),
+        )
+        remove_task_button_hover_color_apply_button.grid(row=4, column=4)
+
+    def ask_color(self, color_name: str) -> None:
+        """
+        Opens the color picker dialog with the initial color from the entry widget. The selected color is then set in the corresponding entry widget.
+
+        :param color_name: The name of the color to set
+        """
+        # Get the initial color from the entry widget
+        initial_color = self.color_entries[color_name].get()
+
+        # Open the color picker dialog with the initial color
+        selected_color, _ = askcolor(color=initial_color, parent=self)
+
+        # Check if a color was selected
+        if selected_color:
+            # Convert the color to hexadecimal format
+            hex_color = "%02x%02x%02x" % (
+                int(selected_color[0]),
+                int(selected_color[1]),
+                int(selected_color[2]),
+            )
+            # Insert the hex color code into the corresponding entry
+            self.color_entries[color_name].delete(0, "end")
+            self.color_entries[color_name].insert(1, hex_color)
+
+    def on_entry_change(
+        self,
+        color_name: str,
+        color_var: ctk.StringVar,
+    ) -> None:
+        """
+        Checks if the entry has a correctly positioned hashtag and adds it if it doesn't.
+
+        :param color_name: The name of the color to update
+        :param color_var: The color variable to update
+        """
+        # Makes border color of the entry to its original color for when was changed to green or red by set_color
+        self.color_entries[color_name].configure(border_color="#565b5e")
+
+        current_text = color_var.get()
+        if not current_text.startswith("#"):
+            # Automatically add '#' if it's not present
+            color_var.set("#" + current_text.lstrip("#"))
+        else:
+            # Remove extra '#' characters if more than one
+            corrected_text = "#" + current_text.lstrip("#").replace("#", "")
+            color_var.set(corrected_text)
+
+        self.update_label_color(color_name, color_var)
+
+    def update_label_color(
+        self,
+        color_name: str,
+        color_var: ctk.StringVar,
+    ) -> None:
+        """
+        Updates the color label in realtime when the user types in the color entry
+
+        :param color_name: The name of the color to update
+        :param color_var: The color variable to update
+        """
+        # Get the current value from the entry
+        hex_color = color_var.get()
+
+        # Update the label's text color, passing if the hex color is is deemed invalid by Tkinter
+        try:
+            self.color_labels[color_name].configure(text_color=hex_color)
+        except TclError:
+            pass
+
+    def set_color(self, color_name: str, hex_color_value: str) -> None:
+        """
+        Sets the color of the given color_name to the given color_value, expecting a valid hex code.
+
+        :param color_name: The name of the color to set
+        :param hex_color_value: The hex color value to set
+        """
+        # Check if the color value is a valid hex color code
+        if self.validate_hex_color(hex_color_value):
+            color_palette = MainWindow.load_color_palette()
+            color_palette[color_name] = hex_color_value
+            MainWindow.save_color_palette(color_palette)
+
+            print(f"Color '{color_name}' set to '{hex_color_value}'")
+            self.color_changed = True
+
+            self.color_entries[color_name].configure(border_color="#28e326")
+        else:
+            self.color_entries[color_name].configure(border_color="red")
+
+    def validate_hex_color(self, color_value: str) -> bool:
+        """
+        Validates if the given color_value is a valid hex color code
+
+        :param color_value: The color value to validate
+        :return: True if the color value is valid hex color code, False otherwise
+        """
+        if not re.match(r"^#([A-Fa-f0-9]{3}){1,2}$", color_value):
+            print("Invalid color value. Color must be a hex code of 3 or 6 characters.")
+            return False
+        else:
+            return True
+
+    def reset_colors_to_default(self) -> None:
+        """Resets all colors to their default values"""
+        color_palette = MainWindow.load_color_palette()
+
+        color_palette["MAIN_FG_COLOR"] = DEFAULT_MAIN_FG_COLOR
+        color_palette["MAIN_HOVER_COLOR"] = DEFAULT_MAIN_HOVER_COLOR
+        color_palette["REMOVE_TASK_BUTTON_FG_COLOR"] = (
+            DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR
+        )
+        color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"] = (
+            DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR
+        )
+
+        MainWindow.save_color_palette(color_palette)
+        self.color_changed = True
+        self.create_window_elements()
+
+        for color_name in self.color_entries:
+            self.color_entries[color_name].configure(border_color="#28e326")
+
+    def on_closing(self) -> None:
+        """Reinitialize colors and redraws all elements of the main window if a color has changed"""
+        if self.color_changed:
+            initialize_colors()
+            main_window.create_window_elements()
+
+        self.destroy()
 
 
 class GlobalSettings(ctk.CTkToplevel):
@@ -233,29 +843,31 @@ class GlobalSettings(ctk.CTkToplevel):
 
         self.checkboxes = {}
 
-        frame_notifications = ctk.CTkFrame(self)
-        frame_notifications.place(relx=0.25, rely=0.13, relwidth=0.5, relheight=0.34)
+        frame_global_settings = ctk.CTkFrame(self)
+        frame_global_settings.place(relx=0.25, rely=0.1, relwidth=0.5, relheight=0.3)
 
-        frame_notifications.columnconfigure(1, weight=3)
-        frame_notifications.columnconfigure(2, weight=1)
+        frame_global_settings.columnconfigure(1, weight=3)
+        frame_global_settings.columnconfigure(2, weight=1)
 
         for i in range(1, 7):
-            frame_notifications.rowconfigure(i, weight=1)
+            frame_global_settings.rowconfigure(i, weight=1)
 
         notifications_title = ctk.CTkLabel(
-            frame_notifications, text="Notifications", font=("Arial", 22)
+            frame_global_settings, text="Notifications", font=("Arial", 22)
         )
         notifications_title.grid(row=1, column=1, columnspan=2)
 
         # Star Battery
         notifications_star_battery = ctk.CTkLabel(
-            frame_notifications, text="Star Battery", font=("Arial", 16)
+            frame_global_settings, text="Star Battery", font=("Arial", 16)
         )
         notifications_star_battery.grid(row=2, column=1)
 
         notifications_star_battery_checkbox = ctk.CTkCheckBox(
-            frame_notifications,
+            frame_global_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("star_battery"),
         )
         notifications_star_battery_checkbox.grid(row=2, column=2, sticky="e")
@@ -264,13 +876,15 @@ class GlobalSettings(ctk.CTkToplevel):
 
         # Tool Case
         notifications_tool_case = ctk.CTkLabel(
-            frame_notifications, text="Tool Case", font=("Arial", 16)
+            frame_global_settings, text="Tool Case", font=("Arial", 16)
         )
         notifications_tool_case.grid(row=3, column=1)
 
         notifications_tool_case_checkbox = ctk.CTkCheckBox(
-            frame_notifications,
+            frame_global_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("tool_case"),
         )
         notifications_tool_case_checkbox.grid(row=3, column=2, sticky="e")
@@ -279,13 +893,15 @@ class GlobalSettings(ctk.CTkToplevel):
 
         # Helmet
         notifications_helmet = ctk.CTkLabel(
-            frame_notifications, text="Helmet", font=("Arial", 16)
+            frame_global_settings, text="Helmet", font=("Arial", 16)
         )
         notifications_helmet.grid(row=4, column=1)
 
         notifications_helmet_checkbox = ctk.CTkCheckBox(
-            frame_notifications,
+            frame_global_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("helmet"),
         )
         notifications_helmet_checkbox.grid(row=4, column=2, sticky="e")
@@ -294,13 +910,15 @@ class GlobalSettings(ctk.CTkToplevel):
 
         # Workers
         notifications_workers = ctk.CTkLabel(
-            frame_notifications, text="Workers", font=("Arial", 16)
+            frame_global_settings, text="Workers", font=("Arial", 16)
         )
         notifications_workers.grid(row=5, column=1)
 
         notifications_workers_checkbox = ctk.CTkCheckBox(
-            frame_notifications,
+            frame_global_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("workers"),
         )
         notifications_workers_checkbox.grid(row=5, column=2, sticky="e")
@@ -309,13 +927,15 @@ class GlobalSettings(ctk.CTkToplevel):
 
         # Buildings
         notifications_buildings = ctk.CTkLabel(
-            frame_notifications, text="Buildings", font=("Arial", 16)
+            frame_global_settings, text="Buildings", font=("Arial", 16)
         )
         notifications_buildings.grid(row=6, column=1)
 
         notifications_buildings_checkbox = ctk.CTkCheckBox(
-            frame_notifications,
+            frame_global_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("buildings"),
         )
         notifications_buildings_checkbox.grid(row=6, column=2, sticky="e")
@@ -325,13 +945,13 @@ class GlobalSettings(ctk.CTkToplevel):
         # Miscellaneous settings
         frame_miscellaneous_settings = ctk.CTkFrame(self)
         frame_miscellaneous_settings.place(
-            relx=0.05, rely=0.53, relwidth=0.9, relheight=0.38
+            relx=0.05, rely=0.45, relwidth=0.9, relheight=0.5
         )
 
         frame_miscellaneous_settings.columnconfigure(1, weight=5)
         frame_miscellaneous_settings.columnconfigure(2, weight=1)
 
-        for i in range(1, 7):
+        for i in range(1, 9):
             frame_miscellaneous_settings.rowconfigure(i, weight=1)
 
         miscellaneous_settings_title = ctk.CTkLabel(
@@ -339,20 +959,60 @@ class GlobalSettings(ctk.CTkToplevel):
         )
         miscellaneous_settings_title.grid(row=1, column=1, columnspan=2)
 
+        # Unique Icons
+        notifications_unique_icons = ctk.CTkLabel(
+            frame_miscellaneous_settings,
+            text="Unique Notification Icons",
+            font=("Arial", 16),
+        )
+        notifications_unique_icons.grid(row=2, column=1)
+
+        notifications_unique_icons_checkbox = ctk.CTkCheckBox(
+            frame_miscellaneous_settings,
+            text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            command=lambda: self.toggle_global_settings("unique_icons"),
+        )
+        notifications_unique_icons_checkbox.grid(row=2, column=2, sticky="e")
+
+        self.checkboxes["unique_icons"] = notifications_unique_icons_checkbox
+
+        # Unique Messages
+        notifications_unique_messages = ctk.CTkLabel(
+            frame_miscellaneous_settings,
+            text="Unique Notification Messages",
+            font=("Arial", 16),
+        )
+        notifications_unique_messages.grid(row=3, column=1)
+
+        notifications_unique_messages_checkbox = ctk.CTkCheckBox(
+            frame_miscellaneous_settings,
+            text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            command=lambda: self.toggle_global_settings("unique_messages"),
+        )
+        notifications_unique_messages_checkbox.grid(row=3, column=2, sticky="e")
+
+        self.checkboxes["unique_messages"] = notifications_unique_messages_checkbox
+
         # Auto delete completed tasks on shutdown
         label_auto_delete_completed_tasks = ctk.CTkLabel(
             frame_miscellaneous_settings,
             text="Delete completed worker tasks on closing",
             font=("Arial", 16),
         )
-        label_auto_delete_completed_tasks.grid(row=2, column=1)
+        label_auto_delete_completed_tasks.grid(row=4, column=1)
 
         checkbox_auto_delete_completed_tasks = ctk.CTkCheckBox(
             frame_miscellaneous_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("auto_delete_completed_tasks"),
         )
-        checkbox_auto_delete_completed_tasks.grid(row=2, column=2, sticky="e")
+        checkbox_auto_delete_completed_tasks.grid(row=4, column=2, sticky="e")
 
         self.checkboxes["auto_delete_completed_tasks"] = (
             checkbox_auto_delete_completed_tasks
@@ -364,17 +1024,19 @@ class GlobalSettings(ctk.CTkToplevel):
             text="Check the checkbox of the instant build time on startup",
             font=("Arial", 16),
         )
-        label_check_checkbox_instant_build_time_on_startup.grid(row=3, column=1)
+        label_check_checkbox_instant_build_time_on_startup.grid(row=5, column=1)
 
         checkbox_check_checkbox_instant_build_time_on_startup = ctk.CTkCheckBox(
             frame_miscellaneous_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings(
                 "check_checkbox_instant_build_time_on_startup"
             ),
         )
         checkbox_check_checkbox_instant_build_time_on_startup.grid(
-            row=3, column=2, sticky="e"
+            row=5, column=2, sticky="e"
         )
 
         self.checkboxes["check_checkbox_instant_build_time_on_startup"] = (
@@ -387,16 +1049,18 @@ class GlobalSettings(ctk.CTkToplevel):
             text="Temporarily disable notifications during startup",
             font=("Arial", 16),
         )
-        label_disable_notifications_during_startup.grid(row=4, column=1)
+        label_disable_notifications_during_startup.grid(row=6, column=1)
 
         checkbox_disable_notifications_during_startup = ctk.CTkCheckBox(
             frame_miscellaneous_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings(
                 "disable_notifications_during_startup"
             ),
         )
-        checkbox_disable_notifications_during_startup.grid(row=4, column=2, sticky="e")
+        checkbox_disable_notifications_during_startup.grid(row=6, column=2, sticky="e")
 
         self.checkboxes["disable_notifications_during_startup"] = (
             checkbox_disable_notifications_during_startup
@@ -408,16 +1072,18 @@ class GlobalSettings(ctk.CTkToplevel):
             text="Get notifications when the program is closed (Restart required)",
             font=("Arial", 16),
         )
-        label_run_notifications_in_background.grid(row=5, column=1)
+        label_run_notifications_in_background.grid(row=7, column=1)
 
         checkbox_run_notifications_in_background = ctk.CTkCheckBox(
             frame_miscellaneous_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings(
                 "run_notifications_in_background"
             ),
         )
-        checkbox_run_notifications_in_background.grid(row=5, column=2, sticky="e")
+        checkbox_run_notifications_in_background.grid(row=7, column=2, sticky="e")
 
         self.checkboxes["run_notifications_in_background"] = (
             checkbox_run_notifications_in_background
@@ -429,14 +1095,16 @@ class GlobalSettings(ctk.CTkToplevel):
             text="Show command window (Debug)",
             font=("Arial", 16),
         )
-        label_show_command_window.grid(row=6, column=1)
+        label_show_command_window.grid(row=8, column=1)
 
         checkbox_show_command_window = ctk.CTkCheckBox(
             frame_miscellaneous_settings,
             text="",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             command=lambda: self.toggle_global_settings("show_command_window"),
         )
-        checkbox_show_command_window.grid(row=6, column=2, sticky="e")
+        checkbox_show_command_window.grid(row=8, column=2, sticky="e")
 
         self.checkboxes["show_command_window"] = checkbox_show_command_window
 
@@ -485,15 +1153,15 @@ class PlanetsSettings(ctk.CTkToplevel):
         main_title = ctk.CTkLabel(self, text="Planets Settings", font=("Arial", 20))
         main_title.place(relx=0.4, rely=0.03)
 
-        frame_colonies = ctk.CTkFrame(self, fg_color="#242424")
-        frame_colonies.place(relx=0.05, rely=0.1, relwidth=0.9, relheight=0.8)
+        frame_planets_settings = ctk.CTkFrame(self, fg_color="#242424")
+        frame_planets_settings.place(relx=0.05, rely=0.1, relwidth=0.9, relheight=0.8)
 
         for i in range(1, 12):
-            frame_colonies.rowconfigure(i, weight=1)
+            frame_planets_settings.rowconfigure(i, weight=1)
 
-        frame_colonies.columnconfigure(1, weight=1)
-        frame_colonies.columnconfigure(2, weight=1)
-        frame_colonies.columnconfigure(3, weight=1)
+        frame_planets_settings.columnconfigure(1, weight=1)
+        frame_planets_settings.columnconfigure(2, weight=1)
+        frame_planets_settings.columnconfigure(3, weight=1)
 
         self.switches_and_comboboxes = {}
 
@@ -508,10 +1176,12 @@ class PlanetsSettings(ctk.CTkToplevel):
 
         for i in range(1, 12):
             switch = ctk.CTkSwitch(
-                frame_colonies,
+                frame_planets_settings,
                 text=f"        Colony {i}",
                 font=("Arial", 16),
                 text_color="grey",
+                progress_color=MAIN_FG_COLOR,
+                button_hover_color=MAIN_HOVER_COLOR,
                 command=lambda i=i: self.toggle_colony(f"colony_{i}"),
             )
             switch.grid(row=i, column=1)
@@ -535,12 +1205,12 @@ class PlanetsSettings(ctk.CTkToplevel):
             except:
                 image_planet = None
             label_image_planet = ctk.CTkLabel(
-                frame_colonies, image=image_planet, text=""
+                frame_planets_settings, image=image_planet, text=""
             )
             label_image_planet.grid(row=i, column=2)
 
             combobox = ctk.CTkComboBox(
-                frame_colonies,
+                frame_planets_settings,
                 values=combobox_options,
                 command=lambda planet, i=i: self.select_colony_image(
                     planet, f"colony_{i}"
@@ -640,6 +1310,7 @@ class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+    def run(self):
         self.title("Galaxy Life Notifier")
         self.geometry("1600x1000")
 
@@ -667,6 +1338,10 @@ class MainWindow(ctk.CTk):
 
     def create_window_elements(self):
         """Creates customtkinter window elements for the main window"""
+        # Clear existing widgets when create_window_elements is called to redraw all elements
+        for widget in self.winfo_children():
+            widget.destroy()
+
         main_title_image = ctk.CTkImage(
             Image.open(Path(MAIN_IMAGES_PATH, "Starling_Postman_AI_Upscaled.png")),
             size=(75, 75),
@@ -680,6 +1355,21 @@ class MainWindow(ctk.CTk):
         )
         main_title.place(relx=0.41, rely=0.01)
 
+        ## Color Settings Button
+        image_button_settings_color = ctk.CTkImage(
+            Image.open(Path(MAIN_IMAGES_PATH, "color_palette.png")),
+            size=(25, 25),
+        )
+        button_settings_color = ctk.CTkButton(
+            self,
+            text="",
+            fg_color="#2b2b2b",
+            hover_color=MAIN_HOVER_COLOR,
+            image=image_button_settings_color,
+            command=ColorSettings,
+        )
+        button_settings_color.place(relx=0.85, rely=0.03, relwidth=0.04, relheight=0.04)
+
         ## Global Settings Button
         image_button_settings_global = ctk.CTkImage(
             Image.open(Path(MAIN_IMAGES_PATH, "dark_mode_options_icon.png")),
@@ -689,12 +1379,11 @@ class MainWindow(ctk.CTk):
             self,
             text="",
             fg_color="#2b2b2b",
+            hover_color=MAIN_HOVER_COLOR,
             image=image_button_settings_global,
             command=GlobalSettings,
         )
-        button_settings_global.place(
-            relx=0.85, rely=0.03, relwidth=0.04, relheight=0.04
-        )
+        button_settings_global.place(relx=0.9, rely=0.03, relwidth=0.04, relheight=0.04)
 
         # Items Frame
         frame_items = ctk.CTkFrame(self)
@@ -744,7 +1433,9 @@ class MainWindow(ctk.CTk):
         button_star_battery = ctk.CTkButton(
             frame_items,
             text="Start Cooldown Timer",
-            font=("Arial", 16),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            font=("Arial", 15),
             command=lambda: self.set_item_cooldown("star_battery"),
         )
         button_star_battery.grid(column=3, row=2)
@@ -770,7 +1461,9 @@ class MainWindow(ctk.CTk):
         button_tool_case = ctk.CTkButton(
             frame_items,
             text="Start Cooldown Timer",
-            font=("Arial", 16),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            font=("Arial", 15),
             command=lambda: self.set_item_cooldown("tool_case"),
         )
         button_tool_case.grid(column=3, row=3)
@@ -796,7 +1489,9 @@ class MainWindow(ctk.CTk):
         button_helmet = ctk.CTkButton(
             frame_items,
             text="Start Cooldown Timer",
-            font=("Arial", 16),
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            font=("Arial", 15),
             command=lambda: self.set_item_cooldown("helmet"),
         )
         button_helmet.grid(column=3, row=4)
@@ -841,6 +1536,7 @@ class MainWindow(ctk.CTk):
             text="Planets Settings",
             font=("Arial", 16),
             fg_color="#2b2b2b",
+            hover_color=MAIN_HOVER_COLOR,
             image=image_button_settings_planets,
             compound="left",
             command=PlanetsSettings,
@@ -895,6 +1591,8 @@ class MainWindow(ctk.CTk):
             checkbox_width=20,
             checkbox_height=20,
             text="Subtract Instant Build Time",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
             font=("Arial", 11),
         )
         self.checkbox_instant_build_time.grid(row=2, column=3)
@@ -910,7 +1608,12 @@ class MainWindow(ctk.CTk):
         )
 
         button_add_worker_task = ctk.CTkButton(
-            self.frame_workers, text="Add", command=self.add_workers_task
+            self.frame_workers,
+            text="Add",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            font=("Arial", 15),
+            command=self.add_workers_task,
         )
         button_add_worker_task.grid(row=2, column=4)
 
@@ -962,6 +1665,7 @@ class MainWindow(ctk.CTk):
             text="Planets Settings",
             font=("Arial", 16),
             fg_color="#2b2b2b",
+            hover_color=MAIN_HOVER_COLOR,
             image=image_button_settings_planets,
             compound="left",
             command=PlanetsSettings,
@@ -1020,7 +1724,12 @@ class MainWindow(ctk.CTk):
         )
 
         button_add_building_task = ctk.CTkButton(
-            self.frame_buildings, text="Add", command=self.add_buildings_task
+            self.frame_buildings,
+            text="Add",
+            fg_color=MAIN_FG_COLOR,
+            hover_color=MAIN_HOVER_COLOR,
+            font=("Arial", 15),
+            command=self.add_buildings_task,
         )
         button_add_building_task.grid(row=2, column=4)
 
@@ -1273,6 +1982,7 @@ class MainWindow(ctk.CTk):
         if task_id in data["workers"]:
             # Delete the specified worker's task
             del data["workers"][task_id]
+            print(f"Removed task {task_id} from data.json")
         else:
             print(
                 f"Workers Task with the following id not found in data.json: {task_id}"
@@ -1355,8 +2065,8 @@ class MainWindow(ctk.CTk):
             button_remove_task = ctk.CTkButton(
                 self.frame_workers_tasks,
                 text="",
-                fg_color="red",
-                hover_color="dark red",
+                fg_color=REMOVE_TASK_BUTTON_FG_COLOR,
+                hover_color=REMOVE_TASK_BUTTON_HOVER_COLOR,
                 width=30,
                 image=image_trashcan,
                 command=lambda task_id=task_id: self.remove_workers_task(task_id),
@@ -1596,8 +2306,8 @@ class MainWindow(ctk.CTk):
             button_remove_task = ctk.CTkButton(
                 self.frame_buildings_tasks,
                 text="",
-                fg_color="red",
-                hover_color="dark red",
+                fg_color=REMOVE_TASK_BUTTON_FG_COLOR,
+                hover_color=REMOVE_TASK_BUTTON_HOVER_COLOR,
                 width=30,
                 image=image_trashcan,
                 command=lambda task_id=task_id: self.remove_buildings_task(task_id),
@@ -1665,6 +2375,31 @@ class MainWindow(ctk.CTk):
         json_settings_file = Path(MAIN_PATH, "settings.json")
         with open(json_settings_file, "w") as file:
             json.dump(settings, file, indent=4)
+
+    @staticmethod
+    def load_color_palette() -> dict:
+        """
+        Loads the color palette from color_palette.json
+
+        :return: dictionary with all the color palette from color_palette.json
+        """
+
+        json_color_palette_file = Path(MAIN_PATH, "color_palette.json")
+        with open(json_color_palette_file, "r") as file:
+            color_palette = json.load(file)
+        return color_palette
+
+    @staticmethod
+    def save_color_palette(color_palette: dict):
+        """
+        Save the provided color palette to the specified JSON color palette file.
+
+        :param color_palette: A dictionary containing the color palette to be saved.
+        """
+
+        json_color_palette_file = Path(MAIN_PATH, "color_palette.json")
+        with open(json_color_palette_file, "w") as file:
+            json.dump(color_palette, file, indent=4)
 
     @staticmethod
     def compare_to_current_time(cooldown_date: str) -> bool:
@@ -1754,7 +2489,8 @@ class MainWindow(ctk.CTk):
         self.destroy()
 
 
-def create_data_json():
+def create_data_json() -> None:
+    """Creates the data.json file if it doesn't exist"""
     print("Creating data.json")
 
     default_data_json_template = {
@@ -1768,7 +2504,8 @@ def create_data_json():
         json.dump(default_data_json_template, file, indent=4)
 
 
-def create_settings_json():
+def create_settings_json() -> None:
+    """Creates the settings.json file if it doesn't exist"""
     print("Creating settings.json")
 
     default_settings_json_template = {
@@ -1778,8 +2515,10 @@ def create_settings_json():
             "helmet": True,
             "workers": True,
             "buildings": True,
+            "unique_icons": True,
+            "unique_messages": True,
             "auto_delete_completed_tasks": False,
-            "check_checkbox_instant_build_time_on_startup": False,
+            "check_checkbox_instant_build_time_on_startup": True,
             "disable_notifications_during_startup": True,
             "run_notifications_in_background": True,
             "show_command_window": False,
@@ -1803,6 +2542,37 @@ def create_settings_json():
         json.dump(default_settings_json_template, file, indent=4)
 
 
+def create_color_palette_json() -> None:
+    """Creates the color_palette.json file if it doesn't exist"""
+    print("Creating color_palette.json")
+
+    default_color_palette_json_template = {
+        "MAIN_FG_COLOR": DEFAULT_MAIN_FG_COLOR,
+        "MAIN_HOVER_COLOR": DEFAULT_MAIN_HOVER_COLOR,
+        "REMOVE_TASK_BUTTON_FG_COLOR": DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR,
+        "REMOVE_TASK_BUTTON_HOVER_COLOR": DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR,
+    }
+
+    with open("color_palette.json", "w") as file:
+        json.dump(default_color_palette_json_template, file, indent=4)
+
+
+def initialize_colors() -> None:
+    """Initialize the colors from the color_palette.json file"""
+    color_palette = MainWindow.load_color_palette()
+
+    global MAIN_FG_COLOR
+    global MAIN_HOVER_COLOR
+    global REMOVE_TASK_BUTTON_FG_COLOR
+    global REMOVE_TASK_BUTTON_HOVER_COLOR
+
+    # Colors
+    MAIN_FG_COLOR = color_palette["MAIN_FG_COLOR"]
+    MAIN_HOVER_COLOR = color_palette["MAIN_HOVER_COLOR"]
+    REMOVE_TASK_BUTTON_FG_COLOR = color_palette["REMOVE_TASK_BUTTON_FG_COLOR"]
+    REMOVE_TASK_BUTTON_HOVER_COLOR = color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"]
+
+
 if __name__ == "__main__":
     # Check if data.json exists
     if not os.path.exists("data.json"):
@@ -1812,7 +2582,14 @@ if __name__ == "__main__":
     if not os.path.exists("settings.json"):
         create_settings_json()
 
+    # Check if color_palette.json exists
+    if not os.path.exists("color_palette.json"):
+        create_color_palette_json()
+
+    initialize_colors()
+
     # Start the GUI
     main_window = MainWindow()
+    main_window.run()
     main_window.protocol("WM_DELETE_WINDOW", main_window.on_closing)
     main_window.mainloop()
