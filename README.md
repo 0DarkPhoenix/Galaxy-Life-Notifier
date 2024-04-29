@@ -13,4 +13,4 @@ There are two options for installing the Galaxy Life Notifier:
 - MSI Installer: The easy way to install the application, which automatically makes a shortcut on the desktop and is easy to uninstall.
 - ZIP file: Extract the zip file into a folder. The directory doesn't matter, as long as you don't move the .exe file.
 
-The application only works on Windows, as I haven't tested it on a Linux distro or Mac OS and know that the code for the notifications only works on Windows.
+The application only works on Windows I haven't tested it on a Linux distro or Mac OS, and I know that the code for the notifications only works on Windows.
