@@ -41,8 +41,8 @@ DEFAULT_MAIN_HOVER_COLOR = "#a54216"
 DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
 DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
-# TODO: Make a tab for making notes
-# TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.
+# TODO: Make a tab for making notes (v1.2)
+# TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.(v1.2)
 
 class NotificationManager:
     def __init__(self):
