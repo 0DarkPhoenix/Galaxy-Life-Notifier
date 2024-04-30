@@ -2,7 +2,9 @@ Experiments/
 output/
 Release/
 dist/
+build/
 color_palette.json
 data.json
 settings.json
 notification_manager.lock
+Galaxy Life Notifier.spec
