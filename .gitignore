@@ -1,6 +1,7 @@
 Experiments/
 output/
 Release/
+dist/
 color_palette.json
 data.json
 settings.json

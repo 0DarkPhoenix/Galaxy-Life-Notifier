@@ -7,7 +7,7 @@
         "buildings": true,
         "unique_icons": true,
         "unique_messages": true,
-        "auto_delete_completed_tasks": true,
+        "auto_delete_completed_tasks": false,
         "check_checkbox_instant_build_time_on_startup": true,
         "disable_notifications_during_startup": true,
         "run_notifications_in_background": false,

@@ -6,6 +6,7 @@ import random
 import re
 import sys
 import threading
+import webbrowser
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -34,13 +35,14 @@ PLANETS_IMAGES_PATH = Path(MAIN_IMAGES_PATH, "Planets")
 
 LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
-# TODO: Save the colors in a separate json file and make it so the user can change them
 # Default Colors
 DEFAULT_MAIN_FG_COLOR = "#d66c2b"
 DEFAULT_MAIN_HOVER_COLOR = "#a54216"
 DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
 DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
+# TODO: Make a tab for making notes
+# TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.
 
 class NotificationManager:
     def __init__(self):
@@ -1342,6 +1344,18 @@ class MainWindow(ctk.CTk):
         for widget in self.winfo_children():
             widget.destroy()
 
+        button_issues = ctk.CTkButton(
+            self,
+            text="⚠ Report Issue",
+            font=("Arial", 13),
+            fg_color="#bc2a29",
+            hover_color="#9b2a29",
+            command=lambda: webbrowser.open(
+                "https://github.com/0DarkPhoenix/Galaxy-Life-Notifier/issues"
+            ),
+        )
+        button_issues.place(relx=0.04, rely=0.02, relwidth=0.08, relheight=0.02)
+
         main_title_image = ctk.CTkImage(
             Image.open(Path(MAIN_IMAGES_PATH, "Starling_Postman_AI_Upscaled.png")),
             size=(75, 75),
@@ -2575,15 +2589,15 @@ def initialize_colors() -> None:
 
 if __name__ == "__main__":
     # Check if data.json exists
-    if not os.path.exists("data.json"):
+    if not os.path.exists(Path(MAIN_PATH, "data.json")):
         create_data_json()
 
     # Check if settings.json exists
-    if not os.path.exists("settings.json"):
+    if not os.path.exists(Path(MAIN_PATH, "settings.json")):
         create_settings_json()
 
     # Check if color_palette.json exists
-    if not os.path.exists("color_palette.json"):
+    if not os.path.exists(Path(MAIN_PATH, "color_palette.json")):
         create_color_palette_json()
 
     initialize_colors()
