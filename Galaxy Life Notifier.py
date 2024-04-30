@@ -2498,7 +2498,10 @@ class MainWindow(ctk.CTk):
         if settings["global_settings"]["run_notifications_in_background"]:
             self.background_command_window()
         else:
-            os.remove(LOCK_FILE_PATH)
+            try:
+                os.remove(LOCK_FILE_PATH)
+            except:
+                pass
 
         self.destroy()
 
