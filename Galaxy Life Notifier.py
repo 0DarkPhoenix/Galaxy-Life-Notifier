@@ -1,6 +1,7 @@
 import asyncio
 import ctypes
 import json
+import multiprocessing
 import os
 import random
 import re
@@ -41,12 +42,17 @@ DEFAULT_MAIN_HOVER_COLOR = "#a54216"
 DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
 DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
-# TODO: Make a tab for making notes (v1.2)
-# TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.(v1.2)
+# TODO: Write an update checker and updater (v1.2)
+# TODO: Make a tab for alliance wars (v1.3)
+# TODO: Make a tab for making notes (v1.3)
+# TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.(v1.3)
+
 
 class NotificationManager:
-    def __init__(self):
+
+    def __init__(self, on_update_callback=None):
         self.running = True
+        self.on_update_callback = on_update_callback
 
     async def notification_checker(self) -> None:
         """
@@ -94,10 +100,11 @@ class NotificationManager:
                         )
 
             if run_workers_task_display:
-                MainWindow.workers_tasks_display(main_window)
-
+                if self.on_update_callback:
+                    self.on_update_callback("workers")
             if run_buildings_task_display:
-                MainWindow.buildings_tasks_display(main_window)
+                if self.on_update_callback:
+                    self.on_update_callback("buildings")
 
             if self.first_iteration:
                 self.first_iteration = False
@@ -129,13 +136,192 @@ class NotificationManager:
         :param section: The section of the task to check (e.g. "workers", "buildings")
         :param task_info: The information of a task_id
         """
+        global_settings = self.global_settings
+        first_iteration = self.first_iteration
+
+        # TODO: rewrite the functions below so it becomes better readable and includes a message and icon for items
+        def determine_message(
+            item: str | None, section: str | None, planet: str, building: str | None
+        ) -> str:
+            """
+            Determine which message needs to be send in the notification
+
+            :param item: An item(e.g. "star_battery", "tool_case", "helmet")
+            :param section: The section of the task (e.g. "workers", "buildings")
+            :param task_info: The information of a task_id
+
+            :return: The message to send in the notification
+            """
+            message_firebit = None
+            message_elderby = None
+
+            if item is not None and global_settings[item]:
+                message = (
+                    f"You can collect your {item.replace('_', ' ').title()} again!"
+                )
+
+            if section is not None and global_settings[section]:
+                if global_settings["unique_messages"]:
+                    match section:
+                        case "workers":
+                            messages = {
+                                f"I'm finished on {planet}, Chief!": None,
+                                f"I'm done. Check out my beautiful work on {planet}!": None,
+                                f"I'm finished on {planet}, I hope you like it!": None,
+                                f"I'm done, {planet} looks even better now!": None,
+                                f"I've completed my task on {planet}, Chief!": None,
+                                f"I finished my task on {planet}. I'm ready for the next one!": None,
+                                f"I've worked tirelessly on {planet}, Chief. I don't need any sleep!": None,
+                                f"I worked for so long on {planet}, I wonder how I'm still not buffed!": None,
+                            }
+                            if global_settings["unique_icons"]:
+                                message_firebit = f"I see your worker has finished upgrading on {planet}. I can't wait to see my army lay that building in ruin!"
+                                message_elderby = f"Your worker on {planet} is done, young Starling. Your base has matured greatly since I've last seen it!"
+                                messages.update(
+                                    {
+                                        message_firebit: 0.01,
+                                        message_elderby: 0.01,
+                                    }
+                                )
+
+                        case "buildings":
+                            match building:
+                                case "Laboratory":
+                                    messages = {
+                                        f"Your upgraded unit on {planet} is done!": None,
+                                        f"I've finished upgrading your unit on {planet}, Chief!": None,
+                                        f"I've made a unit on {planet} even stronger, and you can use him now!": None,
+                                    }
+                                    if global_settings["unique_icons"]:
+                                        message_firebit = f"I see you upgraded a unit on {planet}. Don't be happy about it, you still won't stand a chance against me!"
+                                        message_elderby = f"Your unit on {planet} has been upgraded, young Starling. He looks even more powerful than before!"
+                                        messages.update(
+                                            {
+                                                message_firebit: 0.02,
+                                                message_elderby: 0.02,
+                                            }
+                                        )
+
+                                case "Refinery":
+                                    messages = {
+                                        "Your cube is refined, Chief!": None,
+                                        "I've refined your cube, I wonder what's inside!": None,
+                                        "Another refined cube is ready, Chief!": None,
+                                    }
+
+                                case _:
+                                    messages = {
+                                        f"Your units from the {building} on {planet} are ready!": None,
+                                        f"Your units from the {building} on {planet} are ready to strike on your command!": None,
+                                        f"All units from the {building} on {planet} are trained. Lets show everyone who's the best in the galaxy!": None,
+                                        f"All units from the {building} on {planet} are ready to teach someone a lesson!": None,
+                                    }
+
+                    message = randomly_choose_option(messages)
+
+                    if message == message_firebit:
+                        special_npc = "Firebit"
+                    elif message == message_elderby:
+                        special_npc = "Elderby"
+                    else:
+                        special_npc = None
+
+                else:
+                    # Default message for workers and buildings if unique_messages is not enabled
+                    message = f"Your {building if section == 'buildings' else 'Worker'} on {planet} is done!"
+
+            return message, special_npc
+
+        def determine_icon(
+            item: str | None,
+            section: str | None,
+            building: str,
+            special_npc: str | None = None,
+        ) -> str:
+            """
+            Determine the icon to be displayed in the notification
+
+            :param item: An item (e.g. "star_battery", "tool_case", "helmet")
+            :param section: The section of the task (e.g. "workers", "buildings")
+            :param building: The name of the building
+            :param special_npc: The name of the special NPC when a special message will be displayed (e.g. "Firebit", "Elderby")
+
+            :return: The file name of the icon to be displayed in the notification
+            """
+            icon_images = None
+
+            if global_settings["unique_icons"]:
+                if item:
+                    icon_images = {
+                        "Chubi.ico": None,
+                        "Chubi_Happy.ico": None,
+                    }
+
+                match section:
+                    case "workers":
+                        icon_images = {
+                            "Worker.ico": None,
+                            "Worker_Happy.ico": None,
+                        }
+                    case "buildings":
+                        if building == "Laboratory" or building == "Refinery":
+                            icon_images = {
+                                "Chubi.ico": None,
+                                "Chubi_Happy.ico": None,
+                            }
+                        elif building in ["Training Camp", "Factory", "StarPort"]:
+                            print(f"Building {building} found")
+                            icon_images = {
+                                "Major_Wor.ico": None,
+                                "Major_Wor_Happy.ico": None,
+                            }
+                if icon_images:
+                    icon_image = randomly_choose_option(icon_images)
+
+                match special_npc:
+                    case "Firebit":
+                        icon_image = "Firebit.ico"
+                    case "Elderby":
+                        icon_image = "Elderby.ico"
+            else:
+                icon_image = "Starling_Postman_AI_Upscaled.ico"
+
+            return icon_image
+
+        def randomly_choose_option(options: dict[str, float | None]) -> str:
+            """
+            Randomly chooses an option. Probabilities get automatically calculated.
+
+            :param options: The list of options. An option can be passed with a custom probability of type float. If you don't want a custom probability for that option, pass None
+            :return: The chosen option
+            """
+            total_specified_probability = sum(
+                probability
+                for probability in options.values()
+                if probability is not None
+            )
+            unspecified_options = [
+                msg for msg, probability in options.items() if probability is None
+            ]
+            num_unspecified = len(unspecified_options)
+            if num_unspecified > 0:
+                regular_probability = (
+                    1.0 - total_specified_probability
+                ) / num_unspecified
+                for msg in unspecified_options:
+                    options[msg] = regular_probability
+
+            options, probabilities = zip(*options.items())
+            return random.choices(options, probabilities)[0]
+
+        # Main process_notification logic
         if (
-            section is not None
+            item is not None
+            or section is not None
             and task_info is not None
-            and self.global_settings[section]
-            and not self.first_iteration
-            and not task_info["cooldown_finished"]
+            and not first_iteration
         ):
+
             planet = (
                 "your Main Planet"
                 if task_info["planet"] == "Main Planet"
@@ -143,113 +329,9 @@ class NotificationManager:
             )
             building = task_info["building"] if section == "buildings" else None
 
-            if self.global_settings["unique_messages"]:
-                if section == "workers":
-                    messages = {
-                        f"I'm finished on {planet}, Chief!": None,
-                        f"I'm done. Check out my beautiful work on {planet}!": None,
-                        f"I'm finished on {planet}, I hope you like it!": None,
-                        f"I'm done, {planet} looks even better now!": None,
-                        f"I've completed my task on {planet}, Chief!": None,
-                        f"I finished my task on {planet}. I'm ready for the next one!": None,
-                        f"I've worked tirelessly on {planet}, Chief. I don't need any sleep!": None,
-                        f"I worked for so long on {planet}, I wonder how I'm still not buffed!": None,
-                    }
-                    if self.global_settings["unique_icons"]:
-                        message_firebit = f"I see your worker has finished upgrading on {planet}. I can't wait to see my army lay that building in ruin!"
-                        message_elderby = f"Your worker on {planet} is done, young Starling. Your base has matured greatly since I've last seen it!"
-                        messages.update(
-                            {
-                                message_firebit: 0.01,
-                                message_elderby: 0.01,
-                            }
-                        )
-
-                elif section == "buildings" and building == "Laboratory":
-                    messages = {
-                        f"Your upgraded unit on {planet} is done!": None,
-                        f"I've finished upgrading your unit on {planet}, Chief!": None,
-                        f"I've made a unit on {planet} even stronger, and you can use him now!": None,
-                    }
-                    if self.global_settings["unique_icons"]:
-                        message_firebit = f"I see you upgraded a unit on {planet}. Don't be happy about it, you still won't stand a chance against me!"
-                        message_elderby = f"Your unit on {planet} has been upgraded, young Starling. Its power looks even more terrific than before!"
-                        messages.update(
-                            {
-                                message_firebit: 0.02,
-                                message_elderby: 0.02,
-                            }
-                        )
-
-                message = self.randomly_choose_option(messages)
-
-            else:
-                message = f"Your {building if section == 'buildings' else 'Worker'} on {planet} is done!"
-
-            if self.global_settings["unique_icons"]:
-                if section == "workers":
-                    icon_images = {
-                        "Worker.ico": None,
-                        "Worker_Happy.ico": None,
-                    }
-                elif section == "buildings":
-                    if building == "Laboratory" or building == "Refinery":
-                        icon_images = {
-                            "Chubi.ico": None,
-                            "Chubi_Happy.ico": None,
-                        }
-                    elif building in ["Training Camp", "Factory", "StarPort"]:
-                        icon_images = {
-                            "Major_Wor.ico": None,
-                            "Major_Wor_Happy.ico": None,
-                        }
-
-                # Check if the message matches special cases and assign directly
-                if message == message_firebit:
-                    icon_image = "Firebit.ico"
-                elif message == message_elderby:
-                    icon_image = "Elderby.ico"
-                else:
-                    # Only choose randomly if icon_images is set and not in special message cases
-                    if icon_images is not None:
-                        icon_image = self.randomly_choose_option(icon_images)
-                    else:
-                        raise ValueError(
-                            "No values were assigned to the icon_images dictionary"
-                        )
-            else:
-                icon_image = "Starling_Postman_AI_Upscaled.ico"
-
-            self.send_notification(message, icon_image)
-
-        if (
-            item is not None
-            and self.global_settings[item]
-            and not self.first_iteration
-            and not self.data[item]["cooldown_finished"]
-        ):
-            message = f"You can collect your {item.replace('_', ' ').title()} again!"
-            self.send_notification(message, icon_image)
-
-    def randomly_choose_option(self, options: dict[str, float | None]) -> str:
-        """
-        Randomly chooses an option. Probabilities get automatically calculated.
-
-        :param options: The list of options. An option can be passed with a custom probability of type float. If you don't want a custom probability for that option, pass None
-        :return: The chosen option
-        """
-        total_specified_prob = sum(
-            prob for prob in options.values() if prob is not None
-        )
-        unspecified_options = [msg for msg, prob in options.items() if prob is None]
-        num_unspecified = len(unspecified_options)
-        if num_unspecified > 0:
-            regular_probability = (1.0 - total_specified_prob) / num_unspecified
-            for msg in unspecified_options:
-                options[msg] = regular_probability
-
-        options, probabilities = zip(*options.items())
-        return random.choices(options, probabilities)[0]
+            message, special_npc = determine_message(item, section, planet, building)
+            icon = determine_icon(item, section, building, special_npc)
+            self.send_notification(message, icon)
 
     def send_notification(self, message: str, icon_image: str) -> None:
         """
@@ -1308,6 +1390,10 @@ class PlanetsSettings(ctk.CTkToplevel):
         self.switches_and_comboboxes[colony][1].configure(image=image_planet)
 
 
+def run_notifier(notification_manager):
+    asyncio.run(notification_manager.run())
+
+
 class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -1328,15 +1414,19 @@ class MainWindow(ctk.CTk):
     def start_notification_manager(self):
         self.notification_manager = NotificationManager()
 
-        def run_notifier():
-            asyncio.run(self.notification_manager.run())
-
-        notifier_thread = threading.Thread(target=run_notifier)
+        # Check if notifications should run in the background
         settings = self.load_settings()
-        notifier_thread.daemon = not settings["global_settings"][
+        run_in_background = settings["global_settings"][
             "run_notifications_in_background"
         ]
-        notifier_thread.start()
+
+        notifier_process = threading.Thread(
+            target=run_notifier, args=(self.notification_manager,)
+        )
+        notifier_process.daemon = (
+            not run_in_background
+        )  # daemon doesn't kill the thread when its value is False, so if run_in_background is True, the notifier will run in the background
+        notifier_process.start()
 
     def create_window_elements(self):
         """Creates customtkinter window elements for the main window"""
