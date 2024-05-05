@@ -56,7 +56,7 @@ def main():
         )
         input("Press ENTER after you have closed the application.")
 
-        exe_filename = "dummy.txt"
+        exe_filename = "Galaxy Life Notifier.exe"
         process_name = "Galaxy Life Notifier.exe"  # The name of the process to kill
 
         # Optionally kill the process automatically
@@ -73,4 +73,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
