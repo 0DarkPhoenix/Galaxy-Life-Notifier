@@ -41,9 +41,31 @@ DEFAULT_MAIN_HOVER_COLOR = "#a54216"
 DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
 DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
+# FIXME:fix the error below:
+# Exception in thread Thread-1 (run_notifier):
+# Traceback (most recent call last):
+#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1073, in _bootstrap_inner
+#     self.run()
+#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1010, in run
+#     self._target(*self._args, **self._kwargs)
+#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 1393, in run_notifier
+#     asyncio.run(notification_manager.run())
+#                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 400, in run
+#     loop.run_until_complete(self.notification_checker())
+#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 687, in run_until_complete
+#     return future.result()
+#            ^^^^^^^^^^^^^^^
+#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 79, in notification_checker
+#     self.process_notification(item=item)
+#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 326, in process_notification
+#     if task_info["planet"] == "Main Planet"
+#        ~~~~~~~~~^^^^^^^^^^
+# TypeError: 'NoneType' object is not subscriptable
+
 # TODO: Write an update checker and updater (v1.2)
+# TODO: Make a tab for making notes (v1.2)
 # TODO: Make a tab for alliance wars (v1.3)
-# TODO: Make a tab for making notes (v1.3)
 # TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.(v1.3)
 
 
@@ -1458,7 +1480,7 @@ class MainWindow(ctk.CTk):
             image=main_title_image,
             compound="left",
         )
-        main_title.place(relx=0.41, rely=0.01)
+        main_title.place(relx=0.39, rely=0.01)
 
         ## Color Settings Button
         image_button_settings_color = ctk.CTkImage(
@@ -1490,9 +1512,23 @@ class MainWindow(ctk.CTk):
         )
         button_settings_global.place(relx=0.9, rely=0.03, relwidth=0.04, relheight=0.04)
 
+        # Tabs
+        tabview = ctk.CTkTabview(
+            self,
+            fg_color="#242424",
+            segmented_button_selected_color=MAIN_FG_COLOR,
+            segmented_button_selected_hover_color=MAIN_HOVER_COLOR,
+        )
+        tabview.place(relx=0, rely=0.1, relwidth=1, relheight=0.93)
+
+        tasks_tab = tabview.add("Tasks")
+        alliances_tab = tabview.add("Alliances")
+        items_calculator_tab = tabview.add("Items Calculator")
+        notes_tab = tabview.add("Notes")
+
         # Items Frame
-        frame_items = ctk.CTkFrame(self)
-        frame_items.place(relx=0.03, rely=0.1, relwidth=0.46, relheight=0.25)
+        frame_items = ctk.CTkFrame(tasks_tab)
+        frame_items.place(relx=0.04, rely=0.02, relwidth=0.46, relheight=0.25)
 
         frame_items.columnconfigure(1, weight=1)
         frame_items.columnconfigure(2, weight=1)
@@ -1606,8 +1642,8 @@ class MainWindow(ctk.CTk):
             self.set_item_text(item)
 
         # Workers Frame
-        self.frame_workers = ctk.CTkFrame(self, corner_radius=0)
-        self.frame_workers.place(relx=0.52, rely=0.1, relwidth=0.46, relheight=0.1)
+        self.frame_workers = ctk.CTkFrame(tasks_tab, corner_radius=0)
+        self.frame_workers.place(relx=0.52, rely=0.02, relwidth=0.46, relheight=0.1)
 
         self.frame_workers.rowconfigure(1, weight=1)
         self.frame_workers.rowconfigure(2, weight=1)
@@ -1723,9 +1759,9 @@ class MainWindow(ctk.CTk):
         button_add_worker_task.grid(row=2, column=4)
 
         ## Workers Tasks Display
-        self.frame_workers_tasks = ctk.CTkScrollableFrame(self, corner_radius=0)
+        self.frame_workers_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
         self.frame_workers_tasks.place(
-            relx=0.52, rely=0.2, relwidth=0.46, relheight=0.75
+            relx=0.52, rely=0.12, relwidth=0.46, relheight=0.75
         )
         self.frame_workers_tasks.columnconfigure(1, weight=1)
         self.frame_workers_tasks.columnconfigure(2, weight=1)
@@ -1735,8 +1771,8 @@ class MainWindow(ctk.CTk):
         self.workers_tasks_display()
 
         # Buildings Frame
-        self.frame_buildings = ctk.CTkFrame(self, corner_radius=0)
-        self.frame_buildings.place(relx=0.03, rely=0.37, relwidth=0.46, relheight=0.1)
+        self.frame_buildings = ctk.CTkFrame(tasks_tab, corner_radius=0)
+        self.frame_buildings.place(relx=0.04, rely=0.29, relwidth=0.46, relheight=0.1)
 
         self.frame_buildings.rowconfigure(1, weight=1)
         self.frame_buildings.rowconfigure(2, weight=1)
@@ -1839,9 +1875,9 @@ class MainWindow(ctk.CTk):
         button_add_building_task.grid(row=2, column=4)
 
         ## Buildings Tasks Display
-        self.frame_buildings_tasks = ctk.CTkScrollableFrame(self, corner_radius=0)
+        self.frame_buildings_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
         self.frame_buildings_tasks.place(
-            relx=0.03, rely=0.47, relwidth=0.46, relheight=0.48
+            relx=0.04, rely=0.39, relwidth=0.46, relheight=0.48
         )
         self.frame_buildings_tasks.columnconfigure(1, weight=1)
         self.frame_buildings_tasks.columnconfigure(2, weight=1)
