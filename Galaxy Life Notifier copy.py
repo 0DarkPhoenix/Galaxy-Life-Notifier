@@ -71,9 +71,8 @@ DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
 
 class NotificationManager:
 
-    def __init__(self, on_update_callback=None):
+    def __init__(self):
         self.running = True
-        self.on_update_callback = on_update_callback
 
     async def notification_checker(self) -> None:
         """
@@ -121,11 +120,9 @@ class NotificationManager:
                         )
 
             if run_workers_task_display:
-                if self.on_update_callback:
-                    self.on_update_callback("workers")
+                MainWindow.workers_tasks_display(main_window)
             if run_buildings_task_display:
-                if self.on_update_callback:
-                    self.on_update_callback("buildings")
+                MainWindow.buildings_tasks_display(main_window)
 
             if self.first_iteration:
                 self.first_iteration = False
@@ -151,7 +148,7 @@ class NotificationManager:
         task_info: str | None = None,
     ) -> None:
         """
-        Checks if the notification is send before and sends it if it isn't.
+        Checks if the notification is send before and sends it if the previous is false
 
         :param item: The item to check (e.g. "star_battery", "tool_case", "helmet")
         :param section: The section of the task to check (e.g. "workers", "buildings")
