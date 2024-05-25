@@ -493,7 +493,7 @@ class ColorSettings(ctk.CTkToplevel):
             widget.destroy()
 
         main_title = ctk.CTkLabel(self, text="Color Settings", font=("Arial", 28))
-        main_title.place(relx=0.39, rely=0.03)
+        main_title.place(relx=0.5, rely=0.03, anchor="center")
 
         button_reset_colors_to_default = ctk.CTkButton(
             self,
@@ -943,7 +943,7 @@ class GlobalSettings(ctk.CTkToplevel):
     def create_window_elements(self) -> None:
         """Creates customtkinter window elements for the global settings window"""
         main_title = ctk.CTkLabel(self, text="Global Settings", font=("Arial", 28))
-        main_title.place(relx=0.39, rely=0.03)
+        main_title.place(relx=0.5, rely=0.03, anchor="center")
 
         self.checkboxes = {}
 
@@ -1255,7 +1255,7 @@ class PlanetsSettings(ctk.CTkToplevel):
     def create_window_elements(self):
         """Creates customtkinter window elements for the planets settings window"""
         main_title = ctk.CTkLabel(self, text="Planets Settings", font=("Arial", 20))
-        main_title.place(relx=0.4, rely=0.03)
+        main_title.place(relx=0.5, rely=0.03, anchor="center")
 
         frame_planets_settings = ctk.CTkFrame(self, fg_color="#242424")
         frame_planets_settings.place(relx=0.05, rely=0.1, relwidth=0.9, relheight=0.8)
@@ -1477,7 +1477,7 @@ class MainWindow(ctk.CTk):
             image=main_title_image,
             compound="left",
         )
-        main_title.place(relx=0.39, rely=0.01)
+        main_title.place(relx=0.5, rely=0.01, anchor="center")
 
         ## Color Settings Button
         image_button_settings_color = ctk.CTkImage(
