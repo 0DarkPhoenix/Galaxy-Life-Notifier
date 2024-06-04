@@ -8,6 +8,7 @@ import sys
 import threading
 import webbrowser
 from datetime import datetime, timedelta
+from enum import Enum
 from math import ceil
 from pathlib import Path
 from tkinter import TclError
@@ -35,47 +36,25 @@ PLANETS_IMAGES_PATH = Path(MAIN_IMAGES_PATH, "Planets")
 
 LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
-# Default Colors
-DEFAULT_MAIN_FG_COLOR = "#d66c2b"
-DEFAULT_MAIN_HOVER_COLOR = "#a54216"
-DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
-DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
-
-# FIXME:fix the error below:
-# Exception in thread Thread-1 (run_notifier):
-# Traceback (most recent call last):
-#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1073, in _bootstrap_inner
-#     self.run()
-#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1010, in run
-#     self._target(*self._args, **self._kwargs)
-#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 1393, in run_notifier
-#     asyncio.run(notification_manager.run())
-#                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 400, in run
-#     loop.run_until_complete(self.notification_checker())
-#   File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.1008.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 687, in run_until_complete
-#     return future.result()
-#            ^^^^^^^^^^^^^^^
-#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 79, in notification_checker
-#     self.process_notification(item=item)
-#   File "c:\Users\sjoer\Documents\Python Scripts\Galaxy Life Notifier\Galaxy Life Notifier.py", line 326, in process_notification
-#     if task_info["planet"] == "Main Planet"
-#        ~~~~~~~~~^^^^^^^^^^
-# TypeError: 'NoneType' object is not subscriptable
-
-
 # ---------------------------------------------------------------------------- #
 #                                     TODO                                     #
 # ---------------------------------------------------------------------------- #
 
 # ----------------------------------- v1.2 ----------------------------------- #
 # TODO: Write an update checker and updater
-# TODO: Add sanitization for the entries on the tasks tab
+# FIXME: Fix an issue where the placeholder text doesn't show up anymore in the text boxes
+# TODO: Make an option for the program to start on startup
 
 # ----------------------------------- v1.3 ----------------------------------- #
 # TODO: Make a tab for making notes
 # TODO: Make a tab for alliance wars
 # TODO: Make a tab for calculating how many items you need in total to upgrade starbases, unlock workers, etc.
+
+
+class ItemsEnum(str, Enum):
+    star_battery = "star_battery"
+    tool_case = "tool_case"
+    helmet = "helmet"
 
 
 class NotificationManager:
@@ -100,7 +79,7 @@ class NotificationManager:
             run_buildings_task_display = False
 
             # Process each item and task, updating GUI and calculating minimum cooldown time
-            for item in ["star_battery", "tool_case", "helmet"]:
+            for item in [ItemsEnum.star_battery, ItemsEnum.tool_case, ItemsEnum.helmet]:
                 if not self.data[item]["cooldown_finished"]:
                     scheduled_time = self.data[item]["cooldown"]
                     if MainWindow.compare_to_current_time(scheduled_time):
@@ -152,7 +131,7 @@ class NotificationManager:
     def process_notification(
         self,
         *,
-        item: str | None = None,
+        item: ItemsEnum = None,
         section: str | None = None,
         task_info: str | None = None,
     ) -> None:
@@ -173,7 +152,10 @@ class NotificationManager:
             return
 
         def determine_message(
-            item: str | None, section: str | None, planet: str, building: str | None
+            item: ItemsEnum | None,
+            section: str | None,
+            planet: str,
+            building: str | None,
         ) -> str:
             """
             Determine which message needs to be send in the notification
@@ -264,7 +246,7 @@ class NotificationManager:
             return message, special_npc
 
         def determine_icon(
-            item: str | None,
+            item: ItemsEnum | None,
             section: str | None,
             building: str,
             special_npc: str | None = None,
@@ -400,7 +382,7 @@ class NotificationManager:
     def cooldown_finished(
         self,
         *,
-        item: str | None = None,
+        item: ItemsEnum | None = None,
         section: str | None = None,
         task_id: str | None = None,
     ) -> None:
@@ -842,7 +824,7 @@ class ColorSettings(ctk.CTkToplevel):
         :param color_var: The color variable to update
         """
         # Makes border color of the entry to its original color for when was changed to green or red by set_color
-        self.color_entries[color_name].configure(border_color="#565b5e")
+        self.color_entries[color_name].configure(border_color=DEFAULT_BORDER_COLOR)
 
         current_text = color_var.get()
         if not current_text.startswith("#"):
@@ -981,11 +963,11 @@ class GlobalSettings(ctk.CTkToplevel):
             text="",
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
-            command=lambda: self.toggle_global_settings("star_battery"),
+            command=lambda: self.toggle_global_settings(ItemsEnum.star_battery),
         )
         notifications_star_battery_checkbox.grid(row=2, column=2, sticky="e")
 
-        self.checkboxes["star_battery"] = notifications_star_battery_checkbox
+        self.checkboxes[ItemsEnum.star_battery] = notifications_star_battery_checkbox
 
         # Tool Case
         notifications_tool_case = ctk.CTkLabel(
@@ -998,11 +980,11 @@ class GlobalSettings(ctk.CTkToplevel):
             text="",
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
-            command=lambda: self.toggle_global_settings("tool_case"),
+            command=lambda: self.toggle_global_settings(ItemsEnum.tool_case),
         )
         notifications_tool_case_checkbox.grid(row=3, column=2, sticky="e")
 
-        self.checkboxes["tool_case"] = notifications_tool_case_checkbox
+        self.checkboxes[ItemsEnum.tool_case] = notifications_tool_case_checkbox
 
         # Helmet
         notifications_helmet = ctk.CTkLabel(
@@ -1015,11 +997,11 @@ class GlobalSettings(ctk.CTkToplevel):
             text="",
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
-            command=lambda: self.toggle_global_settings("helmet"),
+            command=lambda: self.toggle_global_settings(ItemsEnum.helmet),
         )
         notifications_helmet_checkbox.grid(row=4, column=2, sticky="e")
 
-        self.checkboxes["helmet"] = notifications_helmet_checkbox
+        self.checkboxes[ItemsEnum.helmet] = notifications_helmet_checkbox
 
         # Workers
         notifications_workers = ctk.CTkLabel(
@@ -1436,6 +1418,10 @@ class MainWindow(ctk.CTk):
         self.toggle_command_window(
             "show" if settings["global_settings"]["show_command_window"] else "hide"
         )
+        self.validate_numeric_input_cmd_command = (
+            self.register(self.validate_numeric_input),
+            "%P",
+        )
 
         self.create_window_elements()
         self.start_notification_manager()
@@ -1528,9 +1514,9 @@ class MainWindow(ctk.CTk):
         tabview.place(relx=0, rely=0.1, relwidth=1, relheight=0.93)
 
         tasks_tab = tabview.add("Tasks")
-        alliances_tab = tabview.add("Alliances")
-        items_calculator_tab = tabview.add("Items Calculator")
-        notes_tab = tabview.add("Notes")
+        # alliances_tab = tabview.add("Alliances")
+        # items_calculator_tab = tabview.add("Items Calculator")
+        # notes_tab = tabview.add("Notes")
 
         # Items Frame
         frame_items = ctk.CTkFrame(tasks_tab)
@@ -1583,7 +1569,7 @@ class MainWindow(ctk.CTk):
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
             font=("Arial", 15),
-            command=lambda: self.set_item_cooldown("star_battery"),
+            command=lambda: self.set_item_cooldown(ItemsEnum.star_battery),
         )
         button_star_battery.grid(column=3, row=2)
 
@@ -1611,7 +1597,7 @@ class MainWindow(ctk.CTk):
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
             font=("Arial", 15),
-            command=lambda: self.set_item_cooldown("tool_case"),
+            command=lambda: self.set_item_cooldown(ItemsEnum.tool_case),
         )
         button_tool_case.grid(column=3, row=3)
 
@@ -1639,17 +1625,17 @@ class MainWindow(ctk.CTk):
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
             font=("Arial", 15),
-            command=lambda: self.set_item_cooldown("helmet"),
+            command=lambda: self.set_item_cooldown(ItemsEnum.helmet),
         )
         button_helmet.grid(column=3, row=4)
 
         # Set the text of the items cooldown labels
-        for item in ["star_battery", "tool_case", "helmet"]:
+        for item in [ItemsEnum.star_battery, ItemsEnum.tool_case, ItemsEnum.helmet]:
             self.set_item_text(item)
 
         # Workers Frame
         self.frame_workers = ctk.CTkFrame(tasks_tab, corner_radius=0)
-        self.frame_workers.place(relx=0.52, rely=0.02, relwidth=0.46, relheight=0.1)
+        self.frame_workers.place(relx=0.52, rely=0.02, relwidth=0.46, relheight=0.12)
 
         self.frame_workers.rowconfigure(1, weight=1)
         self.frame_workers.rowconfigure(2, weight=1)
@@ -1706,9 +1692,27 @@ class MainWindow(ctk.CTk):
             ),
         )  # Values are defined in "def available_planets"
         self.combobox_planet_workers.grid(row=2, column=1)
+        self.combobox_planet_workers.bind(
+            "<Key>",
+            lambda event: self.on_key_press(
+                event, self.combobox_planet_workers, self.label_image_planet_workers
+            ),
+        )
+        self.combobox_planet_workers.bind(
+            "<FocusIn>",
+            lambda event: self.on_focus_in(event, self.combobox_planet_workers),
+        )
+        self.combobox_planet_workers.bind(
+            "<FocusOut>",
+            lambda event: self.on_focus_out(event, self.combobox_planet_workers),
+        )
 
         self.textbox_hours_workers = ctk.CTkEntry(
-            self.frame_workers, placeholder_text="Hours", width=80
+            self.frame_workers,
+            placeholder_text="Hours",
+            width=80,
+            validate="key",
+            validatecommand=self.validate_numeric_input_cmd_command,
         )
         self.textbox_hours_workers.grid(row=2, column=2, sticky="w")
         self.textbox_hours_workers.bind(
@@ -1721,7 +1725,11 @@ class MainWindow(ctk.CTk):
         )
 
         self.textbox_minutes_workers = ctk.CTkEntry(
-            self.frame_workers, placeholder_text="Minutes (0-59)", width=100
+            self.frame_workers,
+            placeholder_text="Minutes (0-59)",
+            width=100,
+            validate="key",
+            validatecommand=self.validate_numeric_input_cmd_command,
         )
         self.textbox_minutes_workers.grid(row=2, column=2, sticky="e")
         self.textbox_minutes_workers.bind(
@@ -1767,7 +1775,7 @@ class MainWindow(ctk.CTk):
         ## Workers Tasks Display
         self.frame_workers_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
         self.frame_workers_tasks.place(
-            relx=0.52, rely=0.12, relwidth=0.46, relheight=0.75
+            relx=0.52, rely=0.14, relwidth=0.46, relheight=0.75
         )
         self.frame_workers_tasks.columnconfigure(1, weight=1)
         self.frame_workers_tasks.columnconfigure(2, weight=1)
@@ -1778,7 +1786,7 @@ class MainWindow(ctk.CTk):
 
         # Buildings Frame
         self.frame_buildings = ctk.CTkFrame(tasks_tab, corner_radius=0)
-        self.frame_buildings.place(relx=0.04, rely=0.29, relwidth=0.46, relheight=0.1)
+        self.frame_buildings.place(relx=0.04, rely=0.29, relwidth=0.46, relheight=0.12)
 
         self.frame_buildings.rowconfigure(1, weight=1)
         self.frame_buildings.rowconfigure(2, weight=1)
@@ -1790,7 +1798,7 @@ class MainWindow(ctk.CTk):
 
         ## Buildings Frame Title
         image_buildings_title = ctk.CTkImage(
-            Image.open(Path(MAIN_IMAGES_PATH, "Warp_Gate.png")),
+            Image.open(Path(MAIN_IMAGES_PATH, "Chubi.png")),
             size=(60, 60),
         )
         label_buildings_title = ctk.CTkLabel(
@@ -1835,6 +1843,20 @@ class MainWindow(ctk.CTk):
             ),
         )  # Values are defined in "def available_planets"
         self.combobox_planet_buildings.grid(row=2, column=1, sticky="e")
+        self.combobox_planet_buildings.bind(
+            "<Key>",
+            lambda event: self.on_key_press(
+                event, self.combobox_planet_buildings, self.label_image_planet_buildings
+            ),
+        )
+        self.combobox_planet_buildings.bind(
+            "<FocusIn>",
+            lambda event: self.on_focus_in(event, self.combobox_planet_buildings),
+        )
+        self.combobox_planet_buildings.bind(
+            "<FocusOut>",
+            lambda event: self.on_focus_out(event, self.combobox_planet_buildings),
+        )
 
         self.combobox_buildings = ctk.CTkComboBox(
             self.frame_buildings,
@@ -1845,7 +1867,11 @@ class MainWindow(ctk.CTk):
         self.combobox_buildings.grid(row=2, column=2)
 
         self.textbox_hours_buildings = ctk.CTkEntry(
-            self.frame_buildings, placeholder_text="Hours", width=90
+            self.frame_buildings,
+            placeholder_text="Hours",
+            width=90,
+            validate="key",
+            validatecommand=self.validate_numeric_input_cmd_command,
         )
         self.textbox_hours_buildings.grid(row=2, column=3, sticky="w")
         self.textbox_hours_buildings.bind(
@@ -1858,7 +1884,11 @@ class MainWindow(ctk.CTk):
         )
 
         self.textbox_minutes_buildings = ctk.CTkEntry(
-            self.frame_buildings, placeholder_text="Minutes (0-59)", width=100
+            self.frame_buildings,
+            placeholder_text="Minutes (0-59)",
+            width=100,
+            validate="key",
+            validatecommand=self.validate_numeric_input_cmd_command,
         )
         self.textbox_minutes_buildings.grid(row=2, column=3, sticky="e")
         self.textbox_minutes_buildings.bind(
@@ -1883,7 +1913,7 @@ class MainWindow(ctk.CTk):
         ## Buildings Tasks Display
         self.frame_buildings_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
         self.frame_buildings_tasks.place(
-            relx=0.04, rely=0.39, relwidth=0.46, relheight=0.48
+            relx=0.04, rely=0.41, relwidth=0.46, relheight=0.48
         )
         self.frame_buildings_tasks.columnconfigure(1, weight=1)
         self.frame_buildings_tasks.columnconfigure(2, weight=1)
@@ -1919,7 +1949,7 @@ class MainWindow(ctk.CTk):
             self.add_buildings_task()
             self.focus_on_hours(event=None, context="buildings")
 
-    def update_item_label(self, item_type: str, text: str) -> None:
+    def update_item_label(self, item_type: ItemsEnum, text: str) -> None:
         """
         Updates the text of an item's cooldown label.
 
@@ -1928,9 +1958,9 @@ class MainWindow(ctk.CTk):
         """
         try:
             label_map = {
-                "star_battery": self.label_star_battery_cooldown,
-                "tool_case": self.label_tool_case_cooldown,
-                "helmet": self.label_helmet_cooldown,
+                ItemsEnum.star_battery: self.label_star_battery_cooldown,
+                ItemsEnum.tool_case: self.label_tool_case_cooldown,
+                ItemsEnum.helmet: self.label_helmet_cooldown,
             }
             if item_type in label_map:
                 label_map[item_type].configure(text=text)
@@ -1939,7 +1969,7 @@ class MainWindow(ctk.CTk):
                 f"Item type '{item_type}' not recognized. Only valuable options are {label_map.keys()}"
             )
 
-    def set_item_text(self, item_type: str):
+    def set_item_text(self, item_type: ItemsEnum):
         """
         Generates the text for an item based on its cooldown.
 
@@ -1953,7 +1983,7 @@ class MainWindow(ctk.CTk):
             elif self.compare_to_current_time(cooldown_date):
                 text = (
                     "Ready to collect! (Compact Houses)"
-                    if item_type == "helmet"
+                    if item_type == ItemsEnum.helmet
                     else "Ready to collect! (Help Friends)"
                 )
             else:
@@ -1975,9 +2005,9 @@ class MainWindow(ctk.CTk):
         :param item_type: The type of the item (e.g., "star_battery", "tool_case", "helmet")
         """
         cooldown_hours = {
-            "star_battery": 11,
-            "tool_case": 23,
-            "helmet": 35,
+            ItemsEnum.star_battery: 11,
+            ItemsEnum.tool_case: 23,
+            ItemsEnum.helmet: 35,
         }
         data = self.load_data()
         if item_type in cooldown_hours:
@@ -2000,14 +2030,14 @@ class MainWindow(ctk.CTk):
         """
         settings = self.load_settings()
 
-        planet_names = []
+        self.planet_names = []
         for key, value in settings["planets_settings"].items():
             if value["enabled"]:
                 planet_name = key.replace("_", " ").title()
-                planet_names.append(planet_name)
+                self.planet_names.append(planet_name)
 
-        self.combobox_planet_workers.configure(values=planet_names)
-        self.combobox_planet_buildings.configure(values=planet_names)
+        self.combobox_planet_workers.configure(values=self.planet_names)
+        self.combobox_planet_buildings.configure(values=self.planet_names)
 
     def add_workers_task(self) -> None:
         """Adds a worker task to data.json if all values have passed the error checking"""
@@ -2024,10 +2054,10 @@ class MainWindow(ctk.CTk):
         )
 
         # Reset previous error border colors
-        self.textbox_hours_workers.configure(border_color="#565b5e")
-        self.textbox_minutes_workers.configure(border_color="#565b5e")
+        self.textbox_hours_workers.configure(border_color=DEFAULT_BORDER_COLOR)
+        self.textbox_minutes_workers.configure(border_color=DEFAULT_BORDER_COLOR)
         self.combobox_planet_workers.configure(
-            border_color="#565b5e", button_color="#565b5e"
+            border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR
         )
 
         if planet == "":
@@ -2281,13 +2311,13 @@ class MainWindow(ctk.CTk):
         )
 
         # Reset previous error border colors
-        self.textbox_hours_buildings.configure(border_color="#565b5e")
-        self.textbox_minutes_buildings.configure(border_color="#565b5e")
+        self.textbox_hours_buildings.configure(border_color=DEFAULT_BORDER_COLOR)
+        self.textbox_minutes_buildings.configure(border_color=DEFAULT_BORDER_COLOR)
         self.combobox_planet_buildings.configure(
-            border_color="#565b5e", button_color="#565b5e"
+            border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR
         )
         self.combobox_buildings.configure(
-            border_color="#565b5e", button_color="#565b5e"
+            border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR
         )
 
         if planet == "":
@@ -2475,6 +2505,38 @@ class MainWindow(ctk.CTk):
             cooldown_date_datetime = datetime.fromisoformat(cooldown_date)
             return f"Ready on {cooldown_date_datetime: %d-%m-%Y %H:%M}"
 
+    def on_key_press(self, event, combobox, label_image):
+
+        key_mapping = {
+            "0": 0,
+            "1": 1,
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5,
+            "6": 6,
+            "7": 7,
+            "8": 8,
+            "9": 9,
+            "slash": 10,
+            "asterisk": 11,
+        }
+        if event.keysym in key_mapping:
+            index = key_mapping[event.keysym]
+            if index < len(self.planet_names):
+                planet = self.planet_names[index]
+
+                combobox.set(planet)
+                self.select_planet_image(planet, label_image)
+
+    def on_focus_in(self, event, combobox):
+        combobox.configure(border_color=MAIN_FG_COLOR, button_color=MAIN_FG_COLOR)
+
+    def on_focus_out(self, event, combobox):
+        combobox.configure(
+            border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR
+        )
+
     @staticmethod
     def load_data() -> dict:
         """
@@ -2528,7 +2590,7 @@ class MainWindow(ctk.CTk):
         """
         Loads the color palette from color_palette.json
 
-        :return: dictionary with all the color palette from color_palette.json
+        :return: dictionary with all the color palettes from color_palette.json
         """
 
         json_color_palette_file = Path(MAIN_PATH, "color_palette.json")
@@ -2569,9 +2631,21 @@ class MainWindow(ctk.CTk):
         return current_datetime >= cooldown_datetime
 
     @staticmethod
+    def validate_numeric_input(value_if_allowed):
+        if (
+            value_if_allowed.isdigit()
+            or value_if_allowed == ""
+            or value_if_allowed == "Hours"
+            or value_if_allowed == "Minutes (0-59)"
+        ):
+            return True
+        else:
+            return False
+
+    @staticmethod
     def toggle_command_window(action: str) -> None:
         """
-         Toggles the command window visibility based on the action parameter.
+        Toggles the command window visibility based on the action parameter.
 
         :param action: "show" to show the command window, "hide" to hide it.
         """
@@ -2644,9 +2718,9 @@ def create_data_json() -> None:
     print("Creating data.json")
 
     default_data_json_template = {
-        "star_battery": {"cooldown": "", "cooldown_finished": False},
-        "tool_case": {"cooldown": "", "cooldown_finished": False},
-        "helmet": {"cooldown": "", "cooldown_finished": False},
+        ItemsEnum.star_battery: {"cooldown": "", "cooldown_finished": False},
+        ItemsEnum.tool_case: {"cooldown": "", "cooldown_finished": False},
+        ItemsEnum.helmet: {"cooldown": "", "cooldown_finished": False},
         "workers": {},
         "buildings": {},
     }
@@ -2660,9 +2734,9 @@ def create_settings_json() -> None:
 
     default_settings_json_template = {
         "global_settings": {
-            "star_battery": True,
-            "tool_case": True,
-            "helmet": True,
+            ItemsEnum.star_battery: True,
+            ItemsEnum.tool_case: True,
+            ItemsEnum.helmet: True,
             "workers": True,
             "buildings": True,
             "unique_icons": True,
@@ -2711,12 +2785,25 @@ def initialize_colors() -> None:
     """Initialize the colors from the color_palette.json file"""
     color_palette = MainWindow.load_color_palette()
 
+    # Default Colors
+    global DEFAULT_BORDER_COLOR
+    global DEFAULT_MAIN_FG_COLOR
+    global DEFAULT_MAIN_HOVER_COLOR
+    global DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR
+    global DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR
+
+    DEFAULT_BORDER_COLOR = "#565b5e"
+    DEFAULT_MAIN_FG_COLOR = "#d66c2b"
+    DEFAULT_MAIN_HOVER_COLOR = "#a54216"
+    DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR = "#c81123"
+    DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR = "#8b0000"
+
+    # Customizable Colors
     global MAIN_FG_COLOR
     global MAIN_HOVER_COLOR
     global REMOVE_TASK_BUTTON_FG_COLOR
     global REMOVE_TASK_BUTTON_HOVER_COLOR
 
-    # Colors
     MAIN_FG_COLOR = color_palette["MAIN_FG_COLOR"]
     MAIN_HOVER_COLOR = color_palette["MAIN_HOVER_COLOR"]
     REMOVE_TASK_BUTTON_FG_COLOR = color_palette["REMOVE_TASK_BUTTON_FG_COLOR"]
