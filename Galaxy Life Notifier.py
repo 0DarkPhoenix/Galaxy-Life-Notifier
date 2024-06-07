@@ -2713,6 +2713,15 @@ class MainWindow(ctk.CTk):
         self.destroy()
 
 
+def create_config_json():
+    default_config_json_template = {
+        "repo_url": "https://raw.githubusercontent.com/0DarkPhoenix/Galaxy-Life-Notifier/main/",
+        "version": "v1.2",
+    }
+    with open("config.json", "w") as file:
+        json.dump(default_config_json_template, file, indent=4)
+
+
 def create_data_json() -> None:
     """Creates the data.json file if it doesn't exist"""
     print("Creating data.json")
@@ -2811,6 +2820,10 @@ def initialize_colors() -> None:
 
 
 if __name__ == "__main__":
+    # Check if config.json exists
+    if not os.path.exists(Path(MAIN_PATH, "config.json")):
+        create_config_json()
+
     # Check if data.json exists
     if not os.path.exists(Path(MAIN_PATH, "data.json")):
         create_data_json()

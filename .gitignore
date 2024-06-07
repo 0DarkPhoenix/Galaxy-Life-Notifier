@@ -2,6 +2,7 @@ Experiments/
 output/
 dist/
 build/
+config.json
 color_palette.json
 data.json
 settings.json

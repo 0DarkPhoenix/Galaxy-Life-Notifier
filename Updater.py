@@ -1,11 +1,17 @@
 import os
+import sys
 import time
 
 import psutil
 import requests
 
 # TODO: Add code which always converts the old settings file with the new settings file using templates and filling it in with the settings it currently has
-
+if getattr(sys, "frozen", False):
+    # If the application is run as a bundled executable, use the directory of the executable
+    MAIN_PATH = os.path.dirname(sys.executable)
+else:
+    # Otherwise, just use the normal directory where the script resides
+    MAIN_PATH = os.path.abspath(os.path.dirname(__file__))
 
 def get_current_version():
     try:
