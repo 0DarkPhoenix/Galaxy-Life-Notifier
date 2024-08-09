@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import webbrowser
+from contextlib import suppress
 from datetime import datetime, timedelta
 from enum import Enum
 from math import ceil
@@ -42,8 +43,10 @@ LOCK_FILE_PATH = Path(MAIN_PATH, "notification_manager.lock")
 
 # ----------------------------------- v1.2 ----------------------------------- #
 # TODO: Write an update checker and updater
-# FIXME: Fix an issue where the placeholder text doesn't show up anymore in the text boxes
 # TODO: Make an option for the program to start on startup
+# TODO: Make an option for the program to start minimized to the system tray
+# TODO: Prevent settings and color pallet windows from being opened as duplicates once one window is already open
+# TODO: Make a tab for making and saving armies
 
 # ----------------------------------- v1.3 ----------------------------------- #
 # TODO: Make a tab for making notes
@@ -58,19 +61,14 @@ class ItemsEnum(str, Enum):
 
 
 class NotificationManager:
-
     def __init__(self):
         self.running = True
 
     async def notification_checker(self) -> None:
-        """
-        Checks the data.json file for scheduled notifications and sends notifications if needed
-        """
+        """Check the data.json file for scheduled notifications and sends notifications if needed."""
         settings = MainWindow.load_settings()
         self.global_settings = settings["global_settings"]
-        self.first_iteration = settings["global_settings"][
-            "disable_notifications_during_startup"
-        ]
+        self.first_iteration = settings["global_settings"]["disable_notifications_during_startup"]
 
         while self.running:
             self.data = MainWindow.load_data()
@@ -78,55 +76,66 @@ class NotificationManager:
             run_workers_task_display = False
             run_buildings_task_display = False
 
-            # Process each item and task, updating GUI and calculating minimum cooldown time
-            for item in [ItemsEnum.star_battery, ItemsEnum.tool_case, ItemsEnum.helmet]:
-                if not self.data[item]["cooldown_finished"]:
-                    scheduled_time = self.data[item]["cooldown"]
-                    if MainWindow.compare_to_current_time(scheduled_time):
-                        MainWindow.set_item_text(main_window, item)
-                        self.cooldown_finished(item=item)
-                        self.process_notification(item=item)
-                    min_cooldown_time = self.update_min_cooldown_time(
-                        min_cooldown_time, scheduled_time
-                    )
+            min_cooldown_time = await self.process_items(min_cooldown_time)
+            (
+                run_workers_task_display,
+                run_buildings_task_display,
+                min_cooldown_time,
+            ) = await self.process_tasks(min_cooldown_time)
 
-            for section in ["workers", "buildings"]:
-                for task_id, task_info in self.data[section].items():
-                    if not task_info["cooldown_finished"]:
-                        scheduled_time = task_info["cooldown"]
-                        if MainWindow.compare_to_current_time(scheduled_time):
-                            self.cooldown_finished(section=section, task_id=task_id)
-                            self.process_notification(
-                                section=section, task_info=task_info
-                            )
-                            if section == "workers":
-                                run_workers_task_display = True
-                            elif section == "buildings":
-                                run_buildings_task_display = True
-                        min_cooldown_time = self.update_min_cooldown_time(
-                            min_cooldown_time, scheduled_time
-                        )
-
-            if run_workers_task_display:
-                MainWindow.workers_tasks_display(main_window)
-            if run_buildings_task_display:
-                MainWindow.buildings_tasks_display(main_window)
+            await self.update_displays(run_workers_task_display, run_buildings_task_display)
 
             if self.first_iteration:
                 self.first_iteration = False
 
-            # Calculate sleep duration
-            if min_cooldown_time:
-                sleep_duration = ceil(
-                    max((min_cooldown_time - datetime.now()).total_seconds(), 1)
-                )
-                sleep_duration = min(sleep_duration, 60)
-            else:
-                sleep_duration = 60
+            sleep_duration = self.calculate_sleep_duration(min_cooldown_time)
 
-            # Wait for the sleep duration or until the event is set
             print(f"Sleeping for {sleep_duration} seconds...")
             await asyncio.sleep(sleep_duration)
+
+    async def process_items(self, min_cooldown_time):
+        for item in [ItemsEnum.star_battery, ItemsEnum.tool_case, ItemsEnum.helmet]:
+            if not self.data[item]["cooldown_finished"]:
+                scheduled_time = self.data[item]["cooldown"]
+                if MainWindow.compare_to_current_time(scheduled_time):
+                    MainWindow.set_item_text(main_window, item)
+                    self.cooldown_finished(item=item)
+                    self.process_notification(item=item)
+                min_cooldown_time = self.update_min_cooldown_time(min_cooldown_time, scheduled_time)
+        return min_cooldown_time
+
+    async def process_tasks(self, min_cooldown_time):
+        run_workers_task_display = False
+        run_buildings_task_display = False
+        for section in ["workers", "buildings"]:
+            for task_id, task_info in self.data[section].items():
+                if not task_info["cooldown_finished"]:
+                    scheduled_time = task_info["cooldown"]
+                    if MainWindow.compare_to_current_time(scheduled_time):
+                        self.cooldown_finished(section=section, task_id=task_id)
+                        self.process_notification(section=section, task_info=task_info)
+                        if section == "workers":
+                            run_workers_task_display = True
+                        elif section == "buildings":
+                            run_buildings_task_display = True
+                    min_cooldown_time = self.update_min_cooldown_time(
+                        min_cooldown_time, scheduled_time
+                    )
+        return run_workers_task_display, run_buildings_task_display, min_cooldown_time
+
+    async def update_displays(self, run_workers_task_display, run_buildings_task_display):
+        if run_workers_task_display:
+            MainWindow.workers_tasks_display(main_window)
+        if run_buildings_task_display:
+            MainWindow.buildings_tasks_display(main_window)
+
+    def calculate_sleep_duration(self, min_cooldown_time):
+        if min_cooldown_time:
+            sleep_duration = ceil(max((min_cooldown_time - datetime.now()).total_seconds(), 1))
+            sleep_duration = min(sleep_duration, 60)
+        else:
+            sleep_duration = 60
+        return sleep_duration
 
     def process_notification(
         self,
@@ -136,7 +145,7 @@ class NotificationManager:
         task_info: str | None = None,
     ) -> None:
         """
-        Checks if the notification is send before and sends it if the previous is false
+        Check if the notification is send before and sends it if the previous is false.
 
         :param item: The item to check (e.g. "star_battery", "tool_case", "helmet")
         :param section: The section of the task to check (e.g. "workers", "buildings")
@@ -145,10 +154,7 @@ class NotificationManager:
         global_settings = self.global_settings
 
         # Check if it's the first iteration and notifications should be disabled
-        if (
-            self.first_iteration
-            and global_settings["disable_notifications_during_startup"]
-        ):
+        if self.first_iteration and global_settings["disable_notifications_during_startup"]:
             return
 
         def determine_message(
@@ -158,7 +164,7 @@ class NotificationManager:
             building: str | None,
         ) -> str:
             """
-            Determine which message needs to be send in the notification
+            Determine which message needs to be send in the notification.
 
             :param item: An item(e.g. "star_battery", "tool_case", "helmet")
             :param section: The section of the task (e.g. "workers", "buildings")
@@ -171,9 +177,7 @@ class NotificationManager:
             message_elderby = None
 
             if item is not None and global_settings[item]:
-                message = (
-                    f"You can collect your {item.replace('_', ' ').title()} again!"
-                )
+                message = f"You can collect your {item.replace('_', ' ').title()} again!"
 
             if section is not None and global_settings[section]:
                 if global_settings["unique_messages"]:
@@ -252,7 +256,7 @@ class NotificationManager:
             special_npc: str | None = None,
         ) -> str:
             """
-            Determine the icon to be displayed in the notification
+            Determine the icon to be displayed in the notification.
 
             :param item: An item (e.g. "star_battery", "tool_case", "helmet")
             :param section: The section of the task (e.g. "workers", "buildings")
@@ -283,7 +287,6 @@ class NotificationManager:
                                 "Chubi_Happy.ico": None,
                             }
                         elif building in ["Training Camp", "Factory", "StarPort"]:
-                            print(f"Building {building} found")
                             icon_images = {
                                 "Major_Wor.ico": None,
                                 "Major_Wor_Happy.ico": None,
@@ -309,18 +312,14 @@ class NotificationManager:
             :return: The chosen option
             """
             total_specified_probability = sum(
-                probability
-                for probability in options.values()
-                if probability is not None
+                probability for probability in options.values() if probability is not None
             )
             unspecified_options = [
                 msg for msg, probability in options.items() if probability is None
             ]
             num_unspecified = len(unspecified_options)
             if num_unspecified > 0:
-                regular_probability = (
-                    1.0 - total_specified_probability
-                ) / num_unspecified
+                regular_probability = (1.0 - total_specified_probability) / num_unspecified
                 for msg in unspecified_options:
                     options[msg] = regular_probability
 
@@ -346,7 +345,7 @@ class NotificationManager:
 
     def send_notification(self, message: str, icon_image: str) -> None:
         """
-        Sends the notification using winotify.
+        Send the notification using winotify.
 
         :param message: The message to be displayed in the notification
         :param icon_image: The icon to be displayed in the notification
@@ -369,13 +368,9 @@ class NotificationManager:
         # Show the notification
         toast.show()
 
-    def update_min_cooldown_time(
-        self, current_min: datetime | None, new_time: str
-    ) -> datetime:
+    def update_min_cooldown_time(self, current_min: datetime | None, new_time: str) -> datetime:
         new_time_datetime = datetime.fromisoformat(new_time)
-        if new_time_datetime and (
-            current_min is None or new_time_datetime < current_min
-        ):
+        if new_time_datetime and (current_min is None or new_time_datetime < current_min):
             return new_time_datetime
         return current_min
 
@@ -387,7 +382,7 @@ class NotificationManager:
         task_id: str | None = None,
     ) -> None:
         """
-        Changes the cooldown_finished parameter to true in data.json for the given section and task_id
+        Change the cooldown_finished parameter to true in data.json for the given section and task_id.
 
         :param item: The item to mark as finished (e.g. "star_battery", "tool_case", "helmet")
         :param section: The section of the task to mark as finished (e.g. "workers", "buildings")
@@ -403,7 +398,7 @@ class NotificationManager:
         MainWindow.save_data(data)
 
     def run(self) -> None:
-        """Runs the notification checker"""
+        """Run the notification checker."""
         self.check_and_handle_existing_instance()
         self.create_lock_file()
         try:
@@ -414,7 +409,7 @@ class NotificationManager:
             self.cleanup()
 
     def check_and_handle_existing_instance(self) -> None:
-        """Checks if an instance of the notification manager is already running and kills it if it is"""
+        """Check if an instance of the notification manager is already running and kills it if it is."""
         if os.path.exists(LOCK_FILE_PATH):
             try:
                 with open(LOCK_FILE_PATH, "r") as file:
@@ -453,12 +448,12 @@ class NotificationManager:
             print(f"Failed to terminate the process with PID {pid}: {e}")
 
     def create_lock_file(self) -> None:
-        """Creates a lock file to prevent multiple instances of the notification manager from running"""
+        """Create a lock file to prevent multiple instances of the notification manager from running."""
         with open(LOCK_FILE_PATH, "w") as lock_file:
             lock_file.write(str(os.getpid()))  # Write the current PID
 
     def cleanup(self) -> None:
-        """Cleans up the lock file and sets the self.running flag to False"""
+        """Clean up the lock file and sets the self.running flag to False."""
         if os.path.exists(LOCK_FILE_PATH):
             os.remove(LOCK_FILE_PATH)
         self.running = False
@@ -478,7 +473,7 @@ class ColorSettings(ctk.CTkToplevel):
         self.create_window_elements()
 
     def create_window_elements(self) -> None:
-        """Creates customtkinter window elements for the color settings window"""
+        """Create customtkinter window elements for the color settings window."""
         # Destroy all widgets in the window to redraw them when a color has changed
         for widget in self.winfo_children():
             widget.destroy()
@@ -493,9 +488,7 @@ class ColorSettings(ctk.CTkToplevel):
             hover_color="darkred",
             command=self.reset_colors_to_default,
         )
-        button_reset_colors_to_default.place(
-            relx=0.75, rely=0.03, relwidth=0.22, relheight=0.04
-        )
+        button_reset_colors_to_default.place(relx=0.75, rely=0.03, relwidth=0.22, relheight=0.04)
 
         self.color_labels = {}
         self.color_entries = {}
@@ -563,9 +556,7 @@ class ColorSettings(ctk.CTkToplevel):
         # Adding trace to main_fg_color_var after the insert function to prevent the on_entry_change function from being called
         main_fg_color_var.trace_add(
             "write",
-            lambda name, index, mode: self.on_entry_change(
-                "MAIN_FG_COLOR", main_fg_color_var
-            ),
+            lambda *_: self.on_entry_change("MAIN_FG_COLOR", main_fg_color_var),
         )
 
         main_fg_color_apply_button = ctk.CTkButton(
@@ -625,9 +616,7 @@ class ColorSettings(ctk.CTkToplevel):
         # Adding trace to main_hover_color_var after the insert function to prevent the on_entry_change function from being called
         main_hover_color_var.trace_add(
             "write",
-            lambda name, index, mode: self.on_entry_change(
-                "MAIN_HOVER_COLOR", main_hover_color_var
-            ),
+            lambda *_: self.on_entry_change("MAIN_HOVER_COLOR", main_hover_color_var),
         )
 
         main_hover_color_apply_button = ctk.CTkButton(
@@ -637,9 +626,7 @@ class ColorSettings(ctk.CTkToplevel):
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
             width=100,
-            command=lambda: self.set_color(
-                "MAIN_HOVER_COLOR", main_hover_color_entry.get()
-            ),
+            command=lambda: self.set_color("MAIN_HOVER_COLOR", main_hover_color_entry.get()),
         )
         main_hover_color_apply_button.grid(row=2, column=4)
 
@@ -661,9 +648,7 @@ class ColorSettings(ctk.CTkToplevel):
             height=25,
             command=lambda: self.ask_color("REMOVE_TASK_BUTTON_FG_COLOR"),
         )
-        remove_task_button_fg_color_color_picker_button.grid(
-            row=3, column=2, sticky="w"
-        )
+        remove_task_button_fg_color_color_picker_button.grid(row=3, column=2, sticky="w")
 
         # Variable to hold the color hex code
         remove_task_button_fg_color_var = ctk.StringVar()
@@ -675,9 +660,7 @@ class ColorSettings(ctk.CTkToplevel):
             font=("Arial", 36),
         )
         remove_task_button_fg_color_label_color.grid(row=3, column=2, sticky="e")
-        self.color_labels["REMOVE_TASK_BUTTON_FG_COLOR"] = (
-            remove_task_button_fg_color_label_color
-        )
+        self.color_labels["REMOVE_TASK_BUTTON_FG_COLOR"] = remove_task_button_fg_color_label_color
 
         remove_task_button_fg_color_entry = ctk.CTkEntry(
             frame_color_settings,
@@ -687,17 +670,13 @@ class ColorSettings(ctk.CTkToplevel):
             width=150,
         )
         remove_task_button_fg_color_entry.grid(row=3, column=3)
-        remove_task_button_fg_color_entry.insert(
-            0, color_palette["REMOVE_TASK_BUTTON_FG_COLOR"]
-        )
-        self.color_entries["REMOVE_TASK_BUTTON_FG_COLOR"] = (
-            remove_task_button_fg_color_entry
-        )
+        remove_task_button_fg_color_entry.insert(0, color_palette["REMOVE_TASK_BUTTON_FG_COLOR"])
+        self.color_entries["REMOVE_TASK_BUTTON_FG_COLOR"] = remove_task_button_fg_color_entry
 
         # Adding trace to remove_task_button_fg_color_var after the insert function to prevent the on_entry_change function from being called
         remove_task_button_fg_color_var.trace_add(
             "write",
-            lambda name, index, mode: self.on_entry_change(
+            lambda *_: self.on_entry_change(
                 "REMOVE_TASK_BUTTON_FG_COLOR", remove_task_button_fg_color_var
             ),
         )
@@ -733,9 +712,7 @@ class ColorSettings(ctk.CTkToplevel):
             height=25,
             command=lambda: self.ask_color("REMOVE_TASK_BUTTON_HOVER_COLOR"),
         )
-        remove_task_button_hover_color_color_picker_button.grid(
-            row=4, column=2, sticky="w"
-        )
+        remove_task_button_hover_color_color_picker_button.grid(row=4, column=2, sticky="w")
 
         # Variable to hold the color hex code
         remove_task_button_hover_color_var = ctk.StringVar()
@@ -762,14 +739,12 @@ class ColorSettings(ctk.CTkToplevel):
         remove_task_button_hover_color_entry.insert(
             0, color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"]
         )
-        self.color_entries["REMOVE_TASK_BUTTON_HOVER_COLOR"] = (
-            remove_task_button_hover_color_entry
-        )
+        self.color_entries["REMOVE_TASK_BUTTON_HOVER_COLOR"] = remove_task_button_hover_color_entry
 
         # Adding trace to remove_task_button_hover_color_var after the insert function to prevent the on_entry_change function from being called
         remove_task_button_hover_color_var.trace_add(
             "write",
-            lambda name, index, mode: self.on_entry_change(
+            lambda *_: self.on_entry_change(
                 "REMOVE_TASK_BUTTON_HOVER_COLOR", remove_task_button_hover_color_var
             ),
         )
@@ -790,7 +765,7 @@ class ColorSettings(ctk.CTkToplevel):
 
     def ask_color(self, color_name: str) -> None:
         """
-        Opens the color picker dialog with the initial color from the entry widget. The selected color is then set in the corresponding entry widget.
+        Open the color picker dialog with the initial color from the entry widget. The selected color is then set in the corresponding entry widget.
 
         :param color_name: The name of the color to set
         """
@@ -818,7 +793,7 @@ class ColorSettings(ctk.CTkToplevel):
         color_var: ctk.StringVar,
     ) -> None:
         """
-        Checks if the entry has a correctly positioned hashtag and adds it if it doesn't.
+        Check if the entry has a correctly positioned hashtag and adds it if it doesn't.
 
         :param color_name: The name of the color to update
         :param color_var: The color variable to update
@@ -843,7 +818,7 @@ class ColorSettings(ctk.CTkToplevel):
         color_var: ctk.StringVar,
     ) -> None:
         """
-        Updates the color label in realtime when the user types in the color entry
+        Update the color label in realtime when the user types in the color entry.
 
         :param color_name: The name of the color to update
         :param color_var: The color variable to update
@@ -852,14 +827,12 @@ class ColorSettings(ctk.CTkToplevel):
         hex_color = color_var.get()
 
         # Update the label's text color, passing if the hex color is is deemed invalid by Tkinter
-        try:
+        with suppress(TclError):
             self.color_labels[color_name].configure(text_color=hex_color)
-        except TclError:
-            pass
 
     def set_color(self, color_name: str, hex_color_value: str) -> None:
         """
-        Sets the color of the given color_name to the given color_value, expecting a valid hex code.
+        Set the color of the given color_name to the given color_value, expecting a valid hex code.
 
         :param color_name: The name of the color to set
         :param hex_color_value: The hex color value to set
@@ -879,7 +852,7 @@ class ColorSettings(ctk.CTkToplevel):
 
     def validate_hex_color(self, color_value: str) -> bool:
         """
-        Validates if the given color_value is a valid hex color code
+        Validate if the given color_value is a valid hex color code.
 
         :param color_value: The color value to validate
         :return: True if the color value is valid hex color code, False otherwise
@@ -891,17 +864,13 @@ class ColorSettings(ctk.CTkToplevel):
             return True
 
     def reset_colors_to_default(self) -> None:
-        """Resets all colors to their default values"""
+        """Reset all colors to their default values."""
         color_palette = MainWindow.load_color_palette()
 
         color_palette["MAIN_FG_COLOR"] = DEFAULT_MAIN_FG_COLOR
         color_palette["MAIN_HOVER_COLOR"] = DEFAULT_MAIN_HOVER_COLOR
-        color_palette["REMOVE_TASK_BUTTON_FG_COLOR"] = (
-            DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR
-        )
-        color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"] = (
-            DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR
-        )
+        color_palette["REMOVE_TASK_BUTTON_FG_COLOR"] = DEFAULT_REMOVE_TASK_BUTTON_FG_COLOR
+        color_palette["REMOVE_TASK_BUTTON_HOVER_COLOR"] = DEFAULT_REMOVE_TASK_BUTTON_HOVER_COLOR
 
         MainWindow.save_color_palette(color_palette)
         self.color_changed = True
@@ -911,7 +880,7 @@ class ColorSettings(ctk.CTkToplevel):
             self.color_entries[color_name].configure(border_color="#28e326")
 
     def on_closing(self) -> None:
-        """Reinitialize colors and redraws all elements of the main window if a color has changed"""
+        """Reinitialize colors and redraws all elements of the main window if a color has changed."""
         if self.color_changed:
             initialize_colors()
             main_window.create_window_elements()
@@ -932,7 +901,7 @@ class GlobalSettings(ctk.CTkToplevel):
         self.set_checkbox_states()
 
     def create_window_elements(self) -> None:
-        """Creates customtkinter window elements for the global settings window"""
+        """Create customtkinter window elements for the global settings window."""
         main_title = ctk.CTkLabel(self, text="Global Settings", font=("Arial", 28))
         main_title.place(relx=0.5, rely=0.05, anchor="center")
 
@@ -1039,9 +1008,7 @@ class GlobalSettings(ctk.CTkToplevel):
 
         # Miscellaneous settings
         frame_miscellaneous_settings = ctk.CTkFrame(self)
-        frame_miscellaneous_settings.place(
-            relx=0.05, rely=0.45, relwidth=0.9, relheight=0.5
-        )
+        frame_miscellaneous_settings.place(relx=0.05, rely=0.45, relwidth=0.9, relheight=0.5)
 
         frame_miscellaneous_settings.columnconfigure(1, weight=5)
         frame_miscellaneous_settings.columnconfigure(2, weight=1)
@@ -1109,9 +1076,7 @@ class GlobalSettings(ctk.CTkToplevel):
         )
         checkbox_auto_delete_completed_tasks.grid(row=4, column=2, sticky="e")
 
-        self.checkboxes["auto_delete_completed_tasks"] = (
-            checkbox_auto_delete_completed_tasks
-        )
+        self.checkboxes["auto_delete_completed_tasks"] = checkbox_auto_delete_completed_tasks
 
         # Auto check the checkbox of the instant build time on startup
         label_check_checkbox_instant_build_time_on_startup = ctk.CTkLabel(
@@ -1130,9 +1095,7 @@ class GlobalSettings(ctk.CTkToplevel):
                 "check_checkbox_instant_build_time_on_startup"
             ),
         )
-        checkbox_check_checkbox_instant_build_time_on_startup.grid(
-            row=5, column=2, sticky="e"
-        )
+        checkbox_check_checkbox_instant_build_time_on_startup.grid(row=5, column=2, sticky="e")
 
         self.checkboxes["check_checkbox_instant_build_time_on_startup"] = (
             checkbox_check_checkbox_instant_build_time_on_startup
@@ -1151,9 +1114,7 @@ class GlobalSettings(ctk.CTkToplevel):
             text="",
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
-            command=lambda: self.toggle_global_settings(
-                "disable_notifications_during_startup"
-            ),
+            command=lambda: self.toggle_global_settings("disable_notifications_during_startup"),
         )
         checkbox_disable_notifications_during_startup.grid(row=6, column=2, sticky="e")
 
@@ -1174,9 +1135,7 @@ class GlobalSettings(ctk.CTkToplevel):
             text="",
             fg_color=MAIN_FG_COLOR,
             hover_color=MAIN_HOVER_COLOR,
-            command=lambda: self.toggle_global_settings(
-                "run_notifications_in_background"
-            ),
+            command=lambda: self.toggle_global_settings("run_notifications_in_background"),
         )
         checkbox_run_notifications_in_background.grid(row=7, column=2, sticky="e")
 
@@ -1204,7 +1163,7 @@ class GlobalSettings(ctk.CTkToplevel):
         self.checkboxes["show_command_window"] = checkbox_show_command_window
 
     def set_checkbox_states(self):
-        """Sets the state of the checkboxes to its corresponding value in settings.json without triggering commands."""
+        """Set the state of the checkboxes to its corresponding value in settings.json without triggering commands."""
         settings = MainWindow.load_settings()
         self.process_commands = False  # Temporarily disable command processing
         for entry, value in settings["global_settings"].items():
@@ -1244,7 +1203,7 @@ class PlanetsSettings(ctk.CTkToplevel):
         self.set_switch_and_combobox_states()
 
     def create_window_elements(self):
-        """Creates customtkinter window elements for the planets settings window"""
+        """Create customtkinter window elements for the planets settings window."""
         main_title = ctk.CTkLabel(self, text="Planets Settings", font=("Arial", 20))
         main_title.place(relx=0.5, rely=0.03, anchor="center")
 
@@ -1281,9 +1240,7 @@ class PlanetsSettings(ctk.CTkToplevel):
             )
             switch.grid(row=i, column=1)
 
-            self.planet = self.settings["planets_settings"][f"colony_{i}"][
-                "planet_image"
-            ]
+            self.planet = self.settings["planets_settings"][f"colony_{i}"]["planet_image"]
             try:
                 if not self.settings["planets_settings"][f"colony_{i}"]["enabled"]:
                     self.planet = self.planet.replace(".png", "_greyscale.png")
@@ -1297,19 +1254,16 @@ class PlanetsSettings(ctk.CTkToplevel):
                     ),
                     size=(40, 40),
                 )
-            except:
+            except Exception:
                 image_planet = None
-            label_image_planet = ctk.CTkLabel(
-                frame_planets_settings, image=image_planet, text=""
-            )
+
+            label_image_planet = ctk.CTkLabel(frame_planets_settings, image=image_planet, text="")
             label_image_planet.grid(row=i, column=2)
 
             combobox = ctk.CTkComboBox(
                 frame_planets_settings,
                 values=combobox_options,
-                command=lambda planet, i=i: self.select_colony_image(
-                    planet, f"colony_{i}"
-                ),
+                command=lambda planet, i=i: self.select_colony_image(planet, f"colony_{i}"),
                 state="disabled",
             )
             combobox.grid(row=i, column=3)
@@ -1322,7 +1276,7 @@ class PlanetsSettings(ctk.CTkToplevel):
             )
 
     def set_switch_and_combobox_states(self):
-        """Sets the state of the switches to its corresponding value in settings.json without triggering the toggle_colony function."""
+        """Set the state of the switches to its corresponding value in settings.json without triggering the toggle_colony function."""
         self.process_commands = False  # Temporarily disable command processing
         for entry in self.settings["planets_settings"]:
             if entry != "main_planet":
@@ -1345,7 +1299,7 @@ class PlanetsSettings(ctk.CTkToplevel):
 
     def toggle_colony(self, colony):
         """
-        Changing state of the combobox when the switch is triggered, and changes the value of the switch in settings.json only when the user triggers the switch.
+        Change the state of the combobox when the switch is triggered, and changes the value of the switch in settings.json only when the user triggers the switch.
 
         :param colony: The colony to toggle (e.g., colony_1, colony_2, .... , colony_11)
         """
@@ -1373,9 +1327,7 @@ class PlanetsSettings(ctk.CTkToplevel):
                 planet_image_grey = planet_image.replace(".png", "_greyscale.png")
                 grey_image_path = Path(PLANETS_IMAGES_PATH, planet_image_grey)
                 if grey_image_path.is_file():  # Check if the path points to a file
-                    grey_image_planet = ctk.CTkImage(
-                        Image.open(grey_image_path), size=(40, 40)
-                    )
+                    grey_image_planet = ctk.CTkImage(Image.open(grey_image_path), size=(40, 40))
                     label_image_planet.configure(image=grey_image_planet)
 
         if self.process_commands:  # Process only if allowed
@@ -1389,15 +1341,12 @@ class PlanetsSettings(ctk.CTkToplevel):
 
     def select_colony_image(self, planet, colony):
         """Save the selected planet image to settings.json and display that image in "label_image_planet"."""
-
         # Save the selected planet image to settings.json
         self.settings["planets_settings"][colony]["planet_image"] = planet
         MainWindow.save_settings(self.settings)
 
         # Display the image
-        image_planet = ctk.CTkImage(
-            Image.open(Path(PLANETS_IMAGES_PATH, planet)), size=(40, 40)
-        )
+        image_planet = ctk.CTkImage(Image.open(Path(PLANETS_IMAGES_PATH, planet)), size=(40, 40))
         self.switches_and_comboboxes[colony][1].configure(image=image_planet)
 
 
@@ -1431,20 +1380,14 @@ class MainWindow(ctk.CTk):
 
         # Check if notifications should run in the background
         settings = self.load_settings()
-        run_in_background = settings["global_settings"][
-            "run_notifications_in_background"
-        ]
+        run_in_background = settings["global_settings"]["run_notifications_in_background"]
 
-        notifier_process = threading.Thread(
-            target=run_notifier, args=(self.notification_manager,)
-        )
-        notifier_process.daemon = (
-            not run_in_background
-        )  # daemon doesn't kill the thread when its value is False, so if run_in_background is True, the notifier will run in the background
+        notifier_process = threading.Thread(target=run_notifier, args=(self.notification_manager,))
+        notifier_process.daemon = not run_in_background  # daemon doesn't kill the thread when its value is False, so if run_in_background is True, the notifier will run in the background
         notifier_process.start()
 
     def create_window_elements(self):
-        """Creates customtkinter window elements for the main window"""
+        """Create customtkinter window elements for the main window."""
         # Clear existing widgets when create_window_elements is called to redraw all elements
         for widget in self.winfo_children():
             widget.destroy()
@@ -1677,9 +1620,7 @@ class MainWindow(ctk.CTk):
         button_settings_planets.grid(row=1, column=4)
 
         ## Workers add task environment
-        self.label_image_planet_workers = ctk.CTkLabel(
-            self.frame_workers, text="", image=None
-        )
+        self.label_image_planet_workers = ctk.CTkLabel(self.frame_workers, text="", image=None)
         self.label_image_planet_workers.grid(row=2, column=1, sticky="w")
 
         self.combobox_planet_workers = ctk.CTkComboBox(
@@ -1687,24 +1628,33 @@ class MainWindow(ctk.CTk):
             width=110,
             state="readonly",
             values=None,
-            command=lambda planet, label_image=self.label_image_planet_workers: self.select_planet_image(
+            command=lambda planet,
+            label_image=self.label_image_planet_workers: self.select_planet_image(
                 planet, label_image
             ),
         )  # Values are defined in "def available_planets"
         self.combobox_planet_workers.grid(row=2, column=1)
         self.combobox_planet_workers.bind(
             "<Key>",
-            lambda event: self.on_key_press(
+            lambda event: self.on_key_press_combobox(
                 event, self.combobox_planet_workers, self.label_image_planet_workers
             ),
         )
         self.combobox_planet_workers.bind(
             "<FocusIn>",
-            lambda event: self.on_focus_in(event, self.combobox_planet_workers),
+            lambda _: self.on_focus_in_combobox(self.combobox_planet_workers),
         )
         self.combobox_planet_workers.bind(
             "<FocusOut>",
-            lambda event: self.on_focus_out(event, self.combobox_planet_workers),
+            lambda _: self.on_focus_out_combobox(self.combobox_planet_workers),
+        )
+        self.combobox_planet_workers.bind(
+            "<Left>",
+            lambda _, context="workers": self.focus_on_minutes(context),
+        )
+        self.combobox_planet_workers.bind(
+            "<Right>",
+            lambda _, context="workers": self.focus_on_hours(context),
         )
 
         self.textbox_hours_workers = ctk.CTkEntry(
@@ -1716,12 +1666,16 @@ class MainWindow(ctk.CTk):
         )
         self.textbox_hours_workers.grid(row=2, column=2, sticky="w")
         self.textbox_hours_workers.bind(
+            "<Left>",
+            lambda _, context="workers": self.focus_on_combobox_planet(context),
+        )
+        self.textbox_hours_workers.bind(
             "<Right>",
-            lambda event, context="workers": self.focus_on_minutes(event, context),
+            lambda _, context="workers": self.focus_on_minutes(context),
         )
         self.textbox_hours_workers.bind(
             "<Return>",
-            lambda event, context="workers": self.add_task_wrapper(event, context),
+            lambda _, context="workers": self.add_task_wrapper(context),
         )
 
         self.textbox_minutes_workers = ctk.CTkEntry(
@@ -1734,11 +1688,15 @@ class MainWindow(ctk.CTk):
         self.textbox_minutes_workers.grid(row=2, column=2, sticky="e")
         self.textbox_minutes_workers.bind(
             "<Left>",
-            lambda event, context="workers": self.focus_on_hours(event, context),
+            lambda _, context="workers": self.focus_on_hours(context),
+        )
+        self.textbox_minutes_workers.bind(
+            "<Right>",
+            lambda _, context="workers": self.focus_on_combobox_planet(context),
         )
         self.textbox_minutes_workers.bind(
             "<Return>",
-            lambda event, context="workers": self.add_task_wrapper(event, context),
+            lambda _, context="workers": self.add_task_wrapper(context),
         )
 
         self.checkbox_instant_build_time = ctk.CTkCheckBox(
@@ -1756,9 +1714,7 @@ class MainWindow(ctk.CTk):
         settings = self.load_settings()
         (
             self.checkbox_instant_build_time.select()
-            if settings["global_settings"][
-                "check_checkbox_instant_build_time_on_startup"
-            ]
+            if settings["global_settings"]["check_checkbox_instant_build_time_on_startup"]
             else self.checkbox_instant_build_time.deselect()
         )
 
@@ -1774,9 +1730,7 @@ class MainWindow(ctk.CTk):
 
         ## Workers Tasks Display
         self.frame_workers_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
-        self.frame_workers_tasks.place(
-            relx=0.52, rely=0.14, relwidth=0.46, relheight=0.75
-        )
+        self.frame_workers_tasks.place(relx=0.52, rely=0.14, relwidth=0.46, relheight=0.75)
         self.frame_workers_tasks.columnconfigure(1, weight=1)
         self.frame_workers_tasks.columnconfigure(2, weight=1)
         self.frame_workers_tasks.columnconfigure(3, weight=1)
@@ -1828,9 +1782,7 @@ class MainWindow(ctk.CTk):
         button_settings_planets.grid(row=1, column=4)
 
         ## Buildings add tasks environment
-        self.label_image_planet_buildings = ctk.CTkLabel(
-            self.frame_buildings, text="", image=None
-        )
+        self.label_image_planet_buildings = ctk.CTkLabel(self.frame_buildings, text="", image=None)
         self.label_image_planet_buildings.grid(row=2, column=1, sticky="w")
 
         self.combobox_planet_buildings = ctk.CTkComboBox(
@@ -1838,24 +1790,33 @@ class MainWindow(ctk.CTk):
             width=110,
             state="readonly",
             values=None,
-            command=lambda planet, label_image=self.label_image_planet_buildings: self.select_planet_image(
+            command=lambda planet,
+            label_image=self.label_image_planet_buildings: self.select_planet_image(
                 planet, label_image
             ),
         )  # Values are defined in "def available_planets"
         self.combobox_planet_buildings.grid(row=2, column=1, sticky="e")
         self.combobox_planet_buildings.bind(
             "<Key>",
-            lambda event: self.on_key_press(
+            lambda event: self.on_key_press_combobox(
                 event, self.combobox_planet_buildings, self.label_image_planet_buildings
             ),
         )
         self.combobox_planet_buildings.bind(
             "<FocusIn>",
-            lambda event: self.on_focus_in(event, self.combobox_planet_buildings),
+            lambda _: self.on_focus_in_combobox(self.combobox_planet_buildings),
         )
         self.combobox_planet_buildings.bind(
             "<FocusOut>",
-            lambda event: self.on_focus_out(event, self.combobox_planet_buildings),
+            lambda _: self.on_focus_out_combobox(self.combobox_planet_buildings),
+        )
+        self.combobox_planet_buildings.bind(
+            "<Left>",
+            lambda _, context="buildings": self.focus_on_minutes(context),
+        )
+        self.combobox_planet_buildings.bind(
+            "<Right>",
+            lambda _, context="buildings": self.focus_on_hours(context),
         )
 
         self.combobox_buildings = ctk.CTkComboBox(
@@ -1875,12 +1836,16 @@ class MainWindow(ctk.CTk):
         )
         self.textbox_hours_buildings.grid(row=2, column=3, sticky="w")
         self.textbox_hours_buildings.bind(
+            "<Left>",
+            lambda _, context="buildings": self.focus_on_combobox_planet(context),
+        )
+        self.textbox_hours_buildings.bind(
             "<Right>",
-            lambda event, context="buildings": self.focus_on_minutes(event, context),
+            lambda _, context="buildings": self.focus_on_minutes(context),
         )
         self.textbox_hours_buildings.bind(
             "<Return>",
-            lambda event, context="buildings": self.add_task_wrapper(event, context),
+            lambda _, context="buildings": self.add_task_wrapper(context),
         )
 
         self.textbox_minutes_buildings = ctk.CTkEntry(
@@ -1893,11 +1858,15 @@ class MainWindow(ctk.CTk):
         self.textbox_minutes_buildings.grid(row=2, column=3, sticky="e")
         self.textbox_minutes_buildings.bind(
             "<Left>",
-            lambda event, context="buildings": self.focus_on_hours(event, context),
+            lambda _, context="buildings": self.focus_on_hours(context),
+        )
+        self.textbox_minutes_buildings.bind(
+            "<Right>",
+            lambda _, context="buildings": self.focus_on_combobox_planet(context),
         )
         self.textbox_minutes_buildings.bind(
             "<Return>",
-            lambda event, context="buildings": self.add_task_wrapper(event, context),
+            lambda _, context="buildings": self.add_task_wrapper(context),
         )
 
         button_add_building_task = ctk.CTkButton(
@@ -1912,9 +1881,7 @@ class MainWindow(ctk.CTk):
 
         ## Buildings Tasks Display
         self.frame_buildings_tasks = ctk.CTkScrollableFrame(tasks_tab, corner_radius=0)
-        self.frame_buildings_tasks.place(
-            relx=0.04, rely=0.41, relwidth=0.46, relheight=0.48
-        )
+        self.frame_buildings_tasks.place(relx=0.04, rely=0.41, relwidth=0.46, relheight=0.48)
         self.frame_buildings_tasks.columnconfigure(1, weight=1)
         self.frame_buildings_tasks.columnconfigure(2, weight=1)
         self.frame_buildings_tasks.columnconfigure(3, weight=1)
@@ -1926,52 +1893,87 @@ class MainWindow(ctk.CTk):
         # Initialize the values for the comboboxes for selecting a planet
         self.available_planets()
 
-    def focus_on_minutes(self, event, context: str) -> None:
-        """Focuses on the minutes textbox of the workers or buildings section"""
+    def on_key_press_combobox(self, event, combobox, label_image):
+        key_mapping = {
+            "0": 0,
+            "1": 1,
+            "2": 2,
+            "3": 3,
+            "4": 4,
+            "5": 5,
+            "6": 6,
+            "7": 7,
+            "8": 8,
+            "9": 9,
+            "slash": 10,
+            "asterisk": 11,
+        }
+        if event.keysym in key_mapping:
+            index = key_mapping[event.keysym]
+            if index < len(self.planet_names):
+                planet = self.planet_names[index]
+
+                combobox.set(planet)
+                self.select_planet_image(planet, label_image)
+
+    def on_focus_in_combobox(self, combobox):
+        combobox.configure(border_color=MAIN_FG_COLOR, button_color=MAIN_FG_COLOR)
+
+    def on_focus_out_combobox(self, combobox):
+        combobox.configure(border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR)
+
+    def focus_on_combobox_planet(self, context: str) -> None:
+        """Focuses on the combobox of the workers or buildings section."""
+        if context == "workers":
+            self.combobox_planet_workers.focus_set()
+        elif context == "buildings":
+            self.combobox_planet_buildings.focus_set()
+
+    def focus_on_minutes(self, context: str) -> None:
+        """Focuses on the minutes textbox of the workers or buildings section."""
         if context == "workers":
             self.textbox_minutes_workers.focus_set()
         elif context == "buildings":
             self.textbox_minutes_buildings.focus_set()
 
-    def focus_on_hours(self, event, context: str) -> None:
-        """Focuses on the hours textbox of the workers or buildings section"""
+    def focus_on_hours(self, context: str) -> None:
+        """Focuses on the hours textbox of the workers or buildings section."""
         if context == "workers":
             self.textbox_hours_workers.focus_set()
         elif context == "buildings":
             self.textbox_hours_buildings.focus_set()
 
-    def add_task_wrapper(self, event, context: str) -> None:
-        """Returns to the hours textbox of the workers or buildings section when a task is added"""
+    def add_task_wrapper(self, context: str) -> None:
+        """Return to the hours textbox of the workers or buildings section when a task is added."""
         if context == "workers":
             self.add_workers_task()
-            self.focus_on_hours(event=None, context="workers")
+            self.focus_on_hours(context="workers")
         elif context == "buildings":
             self.add_buildings_task()
-            self.focus_on_hours(event=None, context="buildings")
+            self.focus_on_hours(context="buildings")
 
     def update_item_label(self, item_type: ItemsEnum, text: str) -> None:
         """
-        Updates the text of an item's cooldown label.
+        Update the text of an item's cooldown label.
 
         :param: item_type: The type of the item (e.g., "star_battery", "tool_case", "helmet")
         :param: text: The new text for the item's cooldown label
         """
-        try:
-            label_map = {
-                ItemsEnum.star_battery: self.label_star_battery_cooldown,
-                ItemsEnum.tool_case: self.label_tool_case_cooldown,
-                ItemsEnum.helmet: self.label_helmet_cooldown,
-            }
-            if item_type in label_map:
-                label_map[item_type].configure(text=text)
-        except KeyError:
+        label_map = {
+            ItemsEnum.star_battery: self.label_star_battery_cooldown,
+            ItemsEnum.tool_case: self.label_tool_case_cooldown,
+            ItemsEnum.helmet: self.label_helmet_cooldown,
+        }
+        if item_type in label_map:
+            label_map[item_type].configure(text=text)
+        else:
             raise KeyError(
                 f"Item type '{item_type}' not recognized. Only valuable options are {label_map.keys()}"
-            )
+            ) from None
 
     def set_item_text(self, item_type: ItemsEnum):
         """
-        Generates the text for an item based on its cooldown.
+        Generate the text for an item based on its cooldown.
 
         :param item_type: The type of the item (e.g., "star_battery", "tool_case", "helmet")
         """
@@ -1993,14 +1995,12 @@ class MainWindow(ctk.CTk):
             self.update_item_label(item_type, text)
 
         except Exception as e:
-            print(f"An error occurred: {str(e)}")
-            self.update_item_label(
-                item_type, "Click the button when you collected this item"
-            )
+            print(f"An error occurred: {e!s}")
+            self.update_item_label(item_type, "Click the button when you collected this item")
 
     def set_item_cooldown(self, item_type: str) -> None:
         """
-        Sets the cooldown for a given item based on its type and updates the corresponding label.
+        Set the cooldown for a given item based on its type and updates the corresponding label.
 
         :param item_type: The type of the item (e.g., "star_battery", "tool_case", "helmet")
         """
@@ -2024,7 +2024,7 @@ class MainWindow(ctk.CTk):
 
     def available_planets(self) -> list[str]:
         """
-        Checks in settings.json which colonies are available to choose from.
+        Check in settings.json which colonies are available to choose from.
 
         :return: list of available planets
         """
@@ -2040,17 +2040,11 @@ class MainWindow(ctk.CTk):
         self.combobox_planet_buildings.configure(values=self.planet_names)
 
     def add_workers_task(self) -> None:
-        """Adds a worker task to data.json if all values have passed the error checking"""
+        """Add a worker task to data.json if all values have passed the error checking."""
         planet = self.combobox_planet_workers.get()
-        hours = (
-            int(self.textbox_hours_workers.get())
-            if self.textbox_hours_workers.get()
-            else 0
-        )
+        hours = int(self.textbox_hours_workers.get()) if self.textbox_hours_workers.get() else 0
         minutes = (
-            int(self.textbox_minutes_workers.get())
-            if self.textbox_minutes_workers.get()
-            else 0
+            int(self.textbox_minutes_workers.get()) if self.textbox_minutes_workers.get() else 0
         )
 
         # Reset previous error border colors
@@ -2061,9 +2055,7 @@ class MainWindow(ctk.CTk):
         )
 
         if planet == "":
-            self.combobox_planet_workers.configure(
-                border_color="red", button_color="red"
-            )
+            self.combobox_planet_workers.configure(border_color="red", button_color="red")
         elif minutes == 0 and hours == 0:
             self.textbox_hours_workers.configure(border_color="red")
             self.textbox_minutes_workers.configure(border_color="red")
@@ -2085,9 +2077,7 @@ class MainWindow(ctk.CTk):
             if self.checkbox_instant_build_time.get() == 1:
                 input_time = timedelta(hours=hours, minutes=minutes)
                 if input_time >= timedelta(minutes=10):
-                    new_time = (
-                        datetime.now() + input_time - timedelta(minutes=5)
-                    ).isoformat()
+                    new_time = (datetime.now() + input_time - timedelta(minutes=5)).isoformat()
                 else:
                     instant_build_time = (
                         input_time - timedelta(minutes=5)
@@ -2096,9 +2086,7 @@ class MainWindow(ctk.CTk):
                     )
                     new_time = (datetime.now() + instant_build_time).isoformat()
             else:
-                new_time = (
-                    datetime.now() + timedelta(hours=hours, minutes=minutes)
-                ).isoformat()
+                new_time = (datetime.now() + timedelta(hours=hours, minutes=minutes)).isoformat()
 
             new_entry = {
                 "cooldown": new_time,
@@ -2107,19 +2095,13 @@ class MainWindow(ctk.CTk):
             }
 
             # Convert workers data to a list of tuples for sorting
-            workers_list = [
-                (task_id, task_info) for task_id, task_info in data["workers"].items()
-            ]
+            workers_list = [(task_id, task_info) for task_id, task_info in data["workers"].items()]
             # Add the new task's cooldown_datetime for comparison
-            new_entry["cooldown_datetime"] = datetime.fromisoformat(
-                new_entry["cooldown"]
-            )
+            new_entry["cooldown_datetime"] = datetime.fromisoformat(new_entry["cooldown"])
             # Find the correct position to insert the new task
             insert_index = 0
             for i, (_, task_info) in enumerate(workers_list):
-                task_info["cooldown_datetime"] = datetime.fromisoformat(
-                    task_info["cooldown"]
-                )
+                task_info["cooldown_datetime"] = datetime.fromisoformat(task_info["cooldown"])
                 if new_entry["cooldown_datetime"] < task_info["cooldown_datetime"]:
                     insert_index = i
                     break
@@ -2131,9 +2113,7 @@ class MainWindow(ctk.CTk):
             workers_list.insert(insert_index, (task_id, new_entry))
 
             # Convert the list back to a dictionary and update the data
-            data["workers"] = {
-                task_id: task_info for task_id, task_info in workers_list
-            }
+            data["workers"] = {task_id: task_info for task_id, task_info in workers_list}
 
             # Clean up temporary keys
             for task_info in data["workers"].values():
@@ -2149,7 +2129,7 @@ class MainWindow(ctk.CTk):
 
     def remove_workers_task(self, task_id: str) -> None:
         """
-        Removes a specified worker's task from data.json
+        Remove a specified worker's task from data.json.
 
         :param task_id: The id of the entry which needs to be removed
         """
@@ -2161,18 +2141,17 @@ class MainWindow(ctk.CTk):
             del data["workers"][task_id]
             print(f"Removed task {task_id} from data.json")
         else:
-            print(
-                f"Workers Task with the following id not found in data.json: {task_id}"
-            )
+            print(f"Workers Task with the following id not found in data.json: {task_id}")
 
         self.save_data(data)
         self.workers_tasks_display()
 
     def select_planet_image(self, planet: str, label_image: ctk.CTkLabel) -> None:
         """
-        Selects the image of the planet
+        Select the image of the planet.
+
         :param planet: The name of the planet
-        :param label_image: The label where the image of the planet must be displayed
+        :param label_image: The label where the image of the planet must be displayed.
         """
         settings = self.load_settings()
 
@@ -2193,9 +2172,7 @@ class MainWindow(ctk.CTk):
             self.update_buildings_options()
 
     def workers_tasks_display(self) -> None:
-        """
-        Display workers' tasks based on the loaded data and settings.
-        """
+        """Display workers' tasks based on the loaded data and settings."""
         data = self.load_data()
         settings = self.load_settings()
 
@@ -2236,7 +2213,7 @@ class MainWindow(ctk.CTk):
             image_trashcan_path = Path(MAIN_IMAGES_PATH, "dark_mode_trash_can.png")
             image_trashcan = ctk.CTkImage(
                 Image.open(image_trashcan_path),
-                size=(20, 20),
+                size=(25, 25),
             )
 
             button_remove_task = ctk.CTkButton(
@@ -2252,8 +2229,9 @@ class MainWindow(ctk.CTk):
 
     def set_workers_cooldown_text(self, task_id: str) -> str:
         """
-        Sets the cooldown text of the label corresponding to the workers task
-        :param task_id: The id of the task
+        Set the cooldown text of the label corresponding to the workers task.
+
+        :param task_id: The id of the task.
         """
         data = self.load_data()
 
@@ -2267,7 +2245,7 @@ class MainWindow(ctk.CTk):
 
     def convert_to_snake_case(self, text: str) -> str:
         """
-        Converts given text to snake case
+        Convert given text to snake case.
 
         :param text: Text to be converted to snake case
         :return: Snake case text
@@ -2278,7 +2256,7 @@ class MainWindow(ctk.CTk):
         return snake_case_text
 
     def update_buildings_options(self) -> None:
-        """Updates the options which can be selected in the combobox self.combobox_buildings"""
+        """Update the options which can be selected in the combobox self.combobox_buildings."""
         selected_planet = self.combobox_planet_buildings.get()
         buildings_values = ["Laboratory", "Training Camp", "Factory", "StarPort"]
 
@@ -2287,27 +2265,18 @@ class MainWindow(ctk.CTk):
             buildings_values.insert(1, "Refinery")
 
         # Prevents "Refinery" from being selected when switching from "Main Planet" to a different planet
-        if (
-            selected_planet != "Main Planet"
-            and self.combobox_buildings.get() == "Refinery"
-        ):
+        if selected_planet != "Main Planet" and self.combobox_buildings.get() == "Refinery":
             self.combobox_buildings.set("")
 
         self.combobox_buildings.configure(values=buildings_values)
 
     def add_buildings_task(self):
-        """Adds a building task to data.json if all values have passed the error checking"""
+        """Add a building task to data.json if all values have passed the error checking."""
         planet = self.combobox_planet_buildings.get()
         building = self.combobox_buildings.get()
-        hours = (
-            int(self.textbox_hours_buildings.get())
-            if self.textbox_hours_buildings.get()
-            else 0
-        )
+        hours = int(self.textbox_hours_buildings.get()) if self.textbox_hours_buildings.get() else 0
         minutes = (
-            int(self.textbox_minutes_buildings.get())
-            if self.textbox_minutes_buildings.get()
-            else 0
+            int(self.textbox_minutes_buildings.get()) if self.textbox_minutes_buildings.get() else 0
         )
 
         # Reset previous error border colors
@@ -2321,9 +2290,7 @@ class MainWindow(ctk.CTk):
         )
 
         if planet == "":
-            self.combobox_planet_buildings.configure(
-                border_color="red", button_color="red"
-            )
+            self.combobox_planet_buildings.configure(border_color="red", button_color="red")
         elif building == "":
             self.combobox_buildings.configure(border_color="red", button_color="red")
         elif minutes == 0 and hours == 0:
@@ -2334,15 +2301,15 @@ class MainWindow(ctk.CTk):
         else:
             data = self.load_data()
 
-            new_time = (
-                datetime.now() + timedelta(hours=hours, minutes=minutes)
-            ).isoformat()
+            new_time = (datetime.now() + timedelta(hours=hours, minutes=minutes)).isoformat()
 
             # Generate the task ID based on the planet, building, and existing tasks
-            planet_building_snake_case = f"{self.convert_to_snake_case(planet)}_{self.convert_to_snake_case(building)}"
+            planet_building_snake_case = (
+                f"{self.convert_to_snake_case(planet)}_{self.convert_to_snake_case(building)}"
+            )
             existing_ids = [
                 int(task_id.split("_")[-1])
-                for task_id in data["buildings"].keys()
+                for task_id in data["buildings"]
                 if task_id.startswith(planet_building_snake_case)
             ]
             next_id = max(existing_ids) + 1 if existing_ids else 1
@@ -2360,15 +2327,11 @@ class MainWindow(ctk.CTk):
                 (task_id, task_info) for task_id, task_info in data["buildings"].items()
             ]
             # Add the new task's cooldown_datetime for comparison
-            new_entry["cooldown_datetime"] = datetime.fromisoformat(
-                new_entry["cooldown"]
-            )
+            new_entry["cooldown_datetime"] = datetime.fromisoformat(new_entry["cooldown"])
             # Find the correct position to insert the new task
             insert_index = 0
             for i, (_, task_info) in enumerate(buildings_list):
-                task_info["cooldown_datetime"] = datetime.fromisoformat(
-                    task_info["cooldown"]
-                )
+                task_info["cooldown_datetime"] = datetime.fromisoformat(task_info["cooldown"])
                 if new_entry["cooldown_datetime"] < task_info["cooldown_datetime"]:
                     insert_index = i
                     break
@@ -2380,9 +2343,7 @@ class MainWindow(ctk.CTk):
             buildings_list.insert(insert_index, (task_id, new_entry))
 
             # Convert the list back to a dictionary and update the data
-            data["buildings"] = {
-                task_id: task_info for task_id, task_info in buildings_list
-            }
+            data["buildings"] = {task_id: task_info for task_id, task_info in buildings_list}
 
             # Clean up temporary keys
             for task_info in data["buildings"].values():
@@ -2398,7 +2359,7 @@ class MainWindow(ctk.CTk):
 
     def remove_buildings_task(self, task_id):
         """
-        Removes a specified building task from data.json
+        Remove specified building task from data.json.
 
         :param task_id: The id of the entry which needs to be removed
         """
@@ -2410,17 +2371,13 @@ class MainWindow(ctk.CTk):
             del data["buildings"][task_id]
             print(f"Removed task {task_id} from data.json")
         else:
-            print(
-                f"Buildings Task with the following id not found in data.json: {task_id}"
-            )
+            print(f"Buildings Task with the following id not found in data.json: {task_id}")
 
         self.save_data(data)
         self.buildings_tasks_display()
 
     def buildings_tasks_display(self):
-        """
-        Display buildings' tasks based on the loaded data and settings.
-        """
+        """Display buildings' tasks based on the loaded data and settings."""
         data = self.load_data()
         settings = self.load_settings()
 
@@ -2477,7 +2434,7 @@ class MainWindow(ctk.CTk):
 
             image_trashcan = ctk.CTkImage(
                 Image.open(Path(MAIN_IMAGES_PATH, "dark_mode_trash_can.png")),
-                size=(20, 20),
+                size=(25, 25),
             )
 
             button_remove_task = ctk.CTkButton(
@@ -2505,42 +2462,10 @@ class MainWindow(ctk.CTk):
             cooldown_date_datetime = datetime.fromisoformat(cooldown_date)
             return f"Ready on {cooldown_date_datetime: %d-%m-%Y %H:%M}"
 
-    def on_key_press(self, event, combobox, label_image):
-
-        key_mapping = {
-            "0": 0,
-            "1": 1,
-            "2": 2,
-            "3": 3,
-            "4": 4,
-            "5": 5,
-            "6": 6,
-            "7": 7,
-            "8": 8,
-            "9": 9,
-            "slash": 10,
-            "asterisk": 11,
-        }
-        if event.keysym in key_mapping:
-            index = key_mapping[event.keysym]
-            if index < len(self.planet_names):
-                planet = self.planet_names[index]
-
-                combobox.set(planet)
-                self.select_planet_image(planet, label_image)
-
-    def on_focus_in(self, event, combobox):
-        combobox.configure(border_color=MAIN_FG_COLOR, button_color=MAIN_FG_COLOR)
-
-    def on_focus_out(self, event, combobox):
-        combobox.configure(
-            border_color=DEFAULT_BORDER_COLOR, button_color=DEFAULT_BORDER_COLOR
-        )
-
     @staticmethod
     def load_data() -> dict:
         """
-        Loads the data from data.json
+        Load the data from data.json.
 
         :return: dictionary with all the data from data.json
         """
@@ -2552,7 +2477,7 @@ class MainWindow(ctk.CTk):
     @staticmethod
     def save_data(data: dict):
         """
-        Saves the data to data.json
+        Save the data to data.json.
 
         :param data: dictionary with data from data.json
         """
@@ -2563,11 +2488,10 @@ class MainWindow(ctk.CTk):
     @staticmethod
     def load_settings() -> dict:
         """
-        Loads the settings from settings.json
+        Load the settings from settings.json.
 
         :return: dictionary with all the settings from settings.json
         """
-
         json_settings_file = Path(MAIN_PATH, "settings.json")
         with open(json_settings_file, "r") as file:
             settings = json.load(file)
@@ -2580,7 +2504,6 @@ class MainWindow(ctk.CTk):
 
         :param settings: A dictionary containing the settings to be saved.
         """
-
         json_settings_file = Path(MAIN_PATH, "settings.json")
         with open(json_settings_file, "w") as file:
             json.dump(settings, file, indent=4)
@@ -2588,11 +2511,10 @@ class MainWindow(ctk.CTk):
     @staticmethod
     def load_color_palette() -> dict:
         """
-        Loads the color palette from color_palette.json
+        Load the color palette from color_palette.json.
 
         :return: dictionary with all the color palettes from color_palette.json
         """
-
         json_color_palette_file = Path(MAIN_PATH, "color_palette.json")
         with open(json_color_palette_file, "r") as file:
             color_palette = json.load(file)
@@ -2605,7 +2527,6 @@ class MainWindow(ctk.CTk):
 
         :param color_palette: A dictionary containing the color palette to be saved.
         """
-
         json_color_palette_file = Path(MAIN_PATH, "color_palette.json")
         with open(json_color_palette_file, "w") as file:
             json.dump(color_palette, file, indent=4)
@@ -2613,34 +2534,30 @@ class MainWindow(ctk.CTk):
     @staticmethod
     def compare_to_current_time(cooldown_date: str) -> bool:
         """
-        Compares the current time to the provided cooldown_date datetime
+        Compare the current time to the provided cooldown_date datetime.
 
         :param cooldown_date: The datetime to compare to the current time, must be in ISO 8601 format (datetime.isoformat())
         :return: True if the current datetime is later or equal to the provided cooldown date, False if the current datetime is earlier than the provided cooldown date
         """
-
         current_datetime = datetime.now()
 
         try:
             cooldown_datetime = datetime.fromisoformat(cooldown_date)
-        except:
+        except ValueError as err:
             raise ValueError(
                 "Invalid datetime format. Please format the datetime to isoformat"
-            )
+            ) from err
 
         return current_datetime >= cooldown_datetime
 
     @staticmethod
     def validate_numeric_input(value_if_allowed):
-        if (
+        return (
             value_if_allowed.isdigit()
             or value_if_allowed == ""
             or value_if_allowed == "Hours"
             or value_if_allowed == "Minutes (0-59)"
-        ):
-            return True
-        else:
-            return False
+        )
 
     @staticmethod
     def toggle_command_window(action: str) -> None:
@@ -2660,14 +2577,14 @@ class MainWindow(ctk.CTk):
 
     @staticmethod
     def background_command_window() -> None:
-        """Keeps the command window running in the background for sending notifications"""
+        """Keep the command window running in the background for sending notifications."""
         whnd = ctypes.windll.kernel32.GetConsoleWindow()
         if whnd != 0:
             ctypes.windll.user32.ShowWindow(whnd, 0)
             ctypes.windll.kernel32.CloseHandle(whnd)
 
     def on_closing(self) -> None:
-        """Closes the window and reindexes the task ids from workers and buildings. If enabled in the settings, it will also delete expired tasks"""
+        """Close the window and reindexes the task ids from workers and buildings. If enabled in the settings, it will also delete expired tasks."""
         print("Closing window")
 
         data = self.load_data()
@@ -2705,10 +2622,8 @@ class MainWindow(ctk.CTk):
         if settings["global_settings"]["run_notifications_in_background"]:
             self.background_command_window()
         else:
-            try:
+            with suppress(Exception):
                 os.remove(LOCK_FILE_PATH)
-            except:
-                pass
 
         self.destroy()
 
@@ -2723,7 +2638,7 @@ def create_config_json():
 
 
 def create_data_json() -> None:
-    """Creates the data.json file if it doesn't exist"""
+    """Create the data.json file if it doesn't exist."""
     print("Creating data.json")
 
     default_data_json_template = {
@@ -2738,7 +2653,7 @@ def create_data_json() -> None:
 
 
 def create_settings_json() -> None:
-    """Creates the settings.json file if it doesn't exist"""
+    """Create the settings.json file if it doesn't exist."""
     print("Creating settings.json")
 
     default_settings_json_template = {
@@ -2776,7 +2691,7 @@ def create_settings_json() -> None:
 
 
 def create_color_palette_json() -> None:
-    """Creates the color_palette.json file if it doesn't exist"""
+    """Create the color_palette.json file if it doesn't exist."""
     print("Creating color_palette.json")
 
     default_color_palette_json_template = {
@@ -2791,7 +2706,7 @@ def create_color_palette_json() -> None:
 
 
 def initialize_colors() -> None:
-    """Initialize the colors from the color_palette.json file"""
+    """Initialize the colors from the color_palette.json file."""
     color_palette = MainWindow.load_color_palette()
 
     # Default Colors

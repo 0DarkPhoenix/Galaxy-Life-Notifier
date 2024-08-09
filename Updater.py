@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 
 import psutil
 import requests
@@ -13,6 +12,7 @@ else:
     # Otherwise, just use the normal directory where the script resides
     MAIN_PATH = os.path.abspath(os.path.dirname(__file__))
 
+
 def get_current_version():
     try:
         with open("version.txt", "r") as file:
@@ -20,12 +20,14 @@ def get_current_version():
     except FileNotFoundError:
         return None
 
+
 def get_latest_version(repo_url):
     response = requests.get(repo_url + "version.txt")
     if response.status_code == 200:
         return response.text.strip()
     else:
         return None
+
 
 def download_new_version(repo_url, filename):
     response = requests.get(repo_url + filename, allow_redirects=True)
@@ -44,9 +46,7 @@ def kill_process(process_name):
 
 
 def main():
-    repo_url = (
-        "https://raw.githubusercontent.com/0DarkPhoenix/Galaxy-Life-Notifier/v1.2/"
-    )
+    repo_url = "https://raw.githubusercontent.com/0DarkPhoenix/Galaxy-Life-Notifier/v1.2/"
 
     current_version = get_current_version()
     latest_version = get_latest_version(repo_url)
@@ -59,9 +59,7 @@ def main():
     print(f"Latest version: {latest_version}")
 
     if latest_version > current_version:
-        print(
-            "New version available! Please close the application to proceed with the update."
-        )
+        print("New version available! Please close the application to proceed with the update.")
         input("Press ENTER after you have closed the application.")
 
         exe_filename = "Galaxy Life Notifier.exe"
@@ -78,6 +76,7 @@ def main():
             print("Failed to download the new version.")
     else:
         print("You are up-to-date!")
+
 
 if __name__ == "__main__":
     main()

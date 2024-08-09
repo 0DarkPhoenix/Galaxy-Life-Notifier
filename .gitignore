@@ -8,3 +8,5 @@ data.json
 settings.json
 notification_manager.lock
 Galaxy Life Notifier.spec
+galaxy_life_notifier.log
+updater.log
